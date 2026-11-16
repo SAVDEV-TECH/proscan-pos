@@ -777,8 +777,8 @@ async def list_models():
     }
 
 if __name__ == "__main__":
-    port = int(os.getenv("BACKEND_PORT", 8000))
-    host = os.getenv("BACKEND_HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", os.getenv("BACKEND_PORT", 8000)))
+    host = os.getenv("BACKEND_HOST", "0.0.0.0")
     
     print(f"[SERVER] Starting Proscan 3-Tier Hybrid Backend on {host}:{port}")
     print(f"[SERVER] API Docs available at: http://{host}:{port}/docs")
