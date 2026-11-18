@@ -1,6 +1,7 @@
 'use client';
 
 import { Component, ReactNode } from 'react';
+import { AlertIcon } from './Icons';
 
 interface Props {
   children: ReactNode;
@@ -31,7 +32,9 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         this.props.fallback ?? (
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-            <div className="text-4xl mb-3">⚠️</div>
+            <div className="flex justify-center mb-3 text-red-600">
+              <AlertIcon className="w-8 h-8" />
+            </div>
             <h3 className="font-bold text-red-900 mb-1">Something went wrong</h3>
             <p className="text-sm text-red-700 mb-4">
               {this.state.error?.message ?? 'An unexpected error occurred'}

@@ -2,6 +2,7 @@
 
 import { Product, getProductPhoto } from '@/lib/products';
 import { useCart } from '@/context/CartContext';
+import { PlusIcon, ProductThumbnail } from '@/components/Icons';
 
 interface ProductDisplayProps {
   product: Product | null;
@@ -53,17 +54,12 @@ export function ProductDisplay({
   return (
     <div className="card p-3.5 sm:p-4 flex items-center justify-between gap-3.5">
       <div className="flex items-center gap-3 min-w-0 flex-1">
-        {realPhoto ? (
-          <img
-            src={realPhoto}
-            alt={product.name}
-            className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border-2 border-emerald-400 shadow-sm shrink-0"
-          />
-        ) : (
-          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-slate-100 flex items-center justify-center text-3xl sm:text-4xl shrink-0">
-            {product.image}
-          </div>
-        )}
+        <ProductThumbnail
+          src={realPhoto}
+          name={product.name}
+          category={product.category}
+          className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl"
+        />
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
@@ -85,9 +81,10 @@ export function ProductDisplay({
 
       <button
         onClick={handleAddToCart}
-        className="btn-primary min-h-[42px] px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-bold shrink-0"
+        className="btn-primary min-h-[42px] px-3.5 sm:px-4 py-2 text-xs sm:text-sm font-bold shrink-0 flex items-center space-x-1"
       >
-        + Cart
+        <PlusIcon className="w-4 h-4" />
+        <span>Cart</span>
       </button>
     </div>
   );

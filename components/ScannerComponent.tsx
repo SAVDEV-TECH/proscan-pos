@@ -2,9 +2,24 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useBackendDetection } from '@/lib/useBackendDetection';
-import { Product, PRODUCTS, getProductPhoto, isRealImage } from '@/lib/products';
+import { Product, PRODUCTS, getProductPhoto } from '@/lib/products';
 import { fetchProducts } from '@/lib/api';
 import { playErrorBuzz } from '@/lib/audio';
+import {
+  VolumeOnIcon,
+  VolumeOffIcon,
+  AlertIcon,
+  FlashlightIcon,
+  RefreshIcon,
+  PlayIcon,
+  PauseIcon,
+  ScanIcon,
+  TargetIcon,
+  SearchIcon,
+  CameraIcon,
+  PackageIcon,
+  ProductThumbnail,
+} from '@/components/Icons';
 
 interface CameraScannerProps {
   onScan: (barcodeOrId: string, productDetails?: Product) => void;
@@ -319,17 +334,17 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
     const frame1 = captureCleanFrameBase64();
     if (!frame1) {
-      setTrainFeedback('⚠️ Camera feed not ready yet — allow camera access and try again.');
+      setTrainFeedback('Camera feed not ready yet.');
       return;
     }
 
     if (trainMode === 'new' && (!newProdName.trim() || !newProdPrice.trim())) {
-      setTrainFeedback('⚠️ Please enter the Product Name (e.g. VIVE Detergent) and Price first.');
+      setTrainFeedback('Please enter Product Name and Price first.');
       return;
     }
 
     setIsTraining(true);
-    setTrainFeedback('📸 Capturing 3-angle visual burst of product in box...');
+    setTrainFeedback('Capturing product...');
 
     // Capture 2 additional rapid burst frames 120ms apart for rock-solid recognition
     const extraFrames: string[] = [];
@@ -362,13 +377,13 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
       const updatedList = await fetchProducts();
       setCatalogProducts(updatedList);
       setTrainFeedback(
-        `✅ Trained & Saved "${trained.name}" ($${trained.price.toFixed(2)}) to backend catalog! Hold it in the camera box anytime to auto-add to cart.`
+        `Saved "${trained.name}" ($${trained.price.toFixed(2)})`
       );
       setNewProdName('');
       setNewProdPrice('');
       triggerProductMatch(trained, 'Trained & Added to Backend');
     } else {
-      setTrainFeedback('❌ Could not capture product features. Hold the product steady inside the center box and try again.');
+      setTrainFeedback('Could not capture product. Hold steady and try again.');
     }
   };
 
@@ -414,10 +429,16 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
             : 'bg-slate-100 text-slate-700 border border-slate-200'
         }`}
       >
-        <div className="flex items-center space-x-1.5 min-w-0">
-          <span className="shrink-0">
-            {backendStatus === 'connected' ? '🟢' : backendStatus === 'checking' ? '🟡' : '⚪'}
-          </span>
+        <div className="flex items-center space-x-2 min-w-0">
+          <span
+            className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+              backendStatus === 'connected'
+                ? 'bg-emerald-500'
+                : backendStatus === 'checking'
+                ? 'bg-amber-500 animate-pulse'
+                : 'bg-slate-400'
+            }`}
+          />
           <span className="truncate">
             {backendStatus === 'connected'
               ? 'Online'
@@ -429,27 +450,30 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
         <div className="flex items-center gap-1.5 shrink-0">
           {isDetecting && (
-            <span className="text-[11px] bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-full font-mono animate-pulse">
-              ⚡
-            </span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
           )}
           <button
             type="button"
             onClick={toggleVoicePos}
-            className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all ${
+            className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all flex items-center space-x-1 ${
               voiceEnabled
                 ? 'bg-indigo-600 text-white border-indigo-600'
                 : 'bg-white text-slate-600 border-slate-300'
             }`}
           >
-            {voiceEnabled ? '🔊 Voice' : '🔇 Muted'}
+            {voiceEnabled ? (
+              <VolumeOnIcon className="w-3.5 h-3.5" />
+            ) : (
+              <VolumeOffIcon className="w-3.5 h-3.5" />
+            )}
+            <span>{voiceEnabled ? 'Voice' : 'Muted'}</span>
           </button>
         </div>
       </div>
 
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-800 px-3 py-2 rounded-xl text-xs flex items-center space-x-2">
-          <span className="shrink-0">⚠️</span>
+          <AlertIcon className="w-4 h-4 shrink-0 text-red-600" />
           <span className="break-words">{error}</span>
         </div>
       )}
@@ -493,9 +517,9 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
             <span className="absolute bottom-2 max-w-[92%] truncate text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-white bg-black/75 px-2.5 py-0.5 rounded-full">
               {lastScannedProduct
-                ? '✅ Matched'
+                ? 'Matched'
                 : productNotFound
-                ? '🔍 Not Found'
+                ? 'Not Found'
                 : 'Scan Item'}
             </span>
           </div>
@@ -505,15 +529,12 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         {lastScannedProduct && (
           <div className="absolute top-2.5 left-2.5 right-2.5 bg-emerald-600/95 backdrop-blur-md text-white px-3 py-2 rounded-xl shadow-xl flex items-center justify-between gap-2">
             <div className="flex items-center space-x-2 font-bold text-xs sm:text-sm min-w-0">
-              {getProductPhoto(lastScannedProduct) ? (
-                <img
-                  src={getProductPhoto(lastScannedProduct)!}
-                  alt={lastScannedProduct.name}
-                  className="w-8 h-8 rounded-lg object-cover border border-white shrink-0"
-                />
-              ) : (
-                <span className="text-lg shrink-0">{lastScannedProduct.image}</span>
-              )}
+              <ProductThumbnail
+                src={getProductPhoto(lastScannedProduct)}
+                name={lastScannedProduct.name}
+                category={lastScannedProduct.category}
+                className="w-8 h-8 rounded-lg"
+              />
               <span className="truncate">
                 {lastScannedProduct.name} • ${lastScannedProduct.price.toFixed(2)}
               </span>
@@ -547,7 +568,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
                     : 'bg-black/75 text-white border-white/20'
                 }`}
               >
-                <span>🔦</span>
+                <FlashlightIcon className="w-3.5 h-3.5" />
                 <span>Light</span>
               </button>
             )}
@@ -556,7 +577,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               onClick={() => setCameraFacing((prev) => (prev === 'environment' ? 'user' : 'environment'))}
               className="bg-black/75 hover:bg-black/90 active:scale-95 text-white text-[11px] font-semibold px-2.5 py-1 rounded-full border border-white/20 backdrop-blur-sm transition-all flex items-center space-x-1"
             >
-              <span>🔄</span>
+              <RefreshIcon className="w-3.5 h-3.5" />
               <span>Flip</span>
             </button>
           </div>
@@ -569,7 +590,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           type="button"
           onClick={isCapturing ? stopCapturing : startCapturing}
           disabled={backendStatus !== 'connected'}
-          className={`min-h-[42px] py-2 px-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all active:scale-[0.98] flex items-center justify-center space-x-1 ${
+          className={`min-h-[42px] py-2 px-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all active:scale-[0.98] flex items-center justify-center space-x-1.5 ${
             backendStatus !== 'connected'
               ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed'
               : isCapturing
@@ -577,27 +598,34 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               : 'bg-emerald-600 hover:bg-emerald-700 text-white'
           }`}
         >
-          <span>{isCapturing ? '⏹️ Pause' : '▶️ Resume'}</span>
+          {isCapturing ? (
+            <PauseIcon className="w-4 h-4" />
+          ) : (
+            <PlayIcon className="w-4 h-4" />
+          )}
+          <span>{isCapturing ? 'Pause' : 'Resume'}</span>
         </button>
 
         <button
           type="button"
           onClick={simulateBarcodeScan}
-          className="min-h-[42px] bg-zinc-800 hover:bg-zinc-900 text-white py-2 px-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all active:scale-[0.98] flex items-center justify-center space-x-1"
+          className="min-h-[42px] bg-zinc-800 hover:bg-zinc-900 text-white py-2 px-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all active:scale-[0.98] flex items-center justify-center space-x-1.5"
         >
-          <span>📋 Simulate</span>
+          <ScanIcon className="w-4 h-4" />
+          <span>Simulate</span>
         </button>
 
         <button
           type="button"
           onClick={() => setShowTrainPanel((prev) => !prev)}
-          className={`min-h-[42px] py-2 px-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all active:scale-[0.98] flex items-center justify-center space-x-1 ${
+          className={`min-h-[42px] py-2 px-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all active:scale-[0.98] flex items-center justify-center space-x-1.5 ${
             showTrainPanel
               ? 'bg-indigo-700 text-white'
               : 'bg-indigo-600 hover:bg-indigo-700 text-white'
           }`}
         >
-          <span>🎯 Train</span>
+          <TargetIcon className="w-4 h-4" />
+          <span>Train</span>
         </button>
       </div>
 
@@ -610,9 +638,11 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               value={manualQuery}
               onChange={(e) => setManualQuery(e.target.value)}
               placeholder="Barcode or item name..."
-              className="w-full pl-7 pr-2.5 py-1.5 rounded-lg border border-slate-300 text-base sm:text-xs font-medium bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-slate-300 text-base sm:text-xs font-medium bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
-            <span className="absolute left-2 top-2 sm:top-1.5 text-slate-400 text-xs">⌨️</span>
+            <span className="absolute left-2.5 top-2.5 sm:top-2 text-slate-400">
+              <SearchIcon className="w-3.5 h-3.5" />
+            </span>
           </div>
           <button
             type="submit"
@@ -632,9 +662,9 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               key={item.id}
               type="button"
               onClick={() => triggerProductMatch(item, 'Quick-Key')}
-              className="flex items-center space-x-1 bg-white hover:bg-indigo-50 active:scale-95 border border-slate-200 rounded-lg px-2 py-1 text-xs font-semibold text-slate-800 shrink-0"
+              className="flex items-center space-x-1.5 bg-white hover:bg-indigo-50 active:scale-95 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-800 shrink-0"
             >
-              <span>{isRealImage(item.image) ? '📸' : item.image}</span>
+              <PackageIcon className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
               <span className="max-w-[85px] truncate">{item.name}</span>
               <span className="text-emerald-700 font-bold">${item.price.toFixed(2)}</span>
             </button>
@@ -646,7 +676,10 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
       {showTrainPanel && (
         <div className="bg-indigo-50/90 border border-indigo-200 rounded-xl p-3 space-y-2.5">
           <div className="flex items-center justify-between gap-2">
-            <h4 className="font-bold text-indigo-950 text-xs sm:text-sm">📸 Train Product</h4>
+            <h4 className="font-bold text-indigo-950 text-xs sm:text-sm flex items-center space-x-1.5">
+              <CameraIcon className="w-4 h-4 text-indigo-600" />
+              <span>Train Product</span>
+            </h4>
 
             <div className="flex gap-1 text-xs font-bold">
               <button
@@ -669,7 +702,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
                     : 'bg-white text-indigo-700 border border-indigo-200'
                 }`}
               >
-                🔄 Existing
+                Existing
               </button>
             </div>
           </div>
@@ -715,9 +748,10 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               <button
                 type="submit"
                 disabled={isTraining}
-                className="w-full min-h-[40px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-xs shadow-sm active:scale-[0.98]"
+                className="w-full min-h-[40px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-xs shadow-sm active:scale-[0.98] flex items-center justify-center space-x-1.5"
               >
-                {isTraining ? '⏳ Saving...' : '📸 Capture & Save'}
+                <CameraIcon className="w-4 h-4" />
+                <span>{isTraining ? 'Saving...' : 'Capture & Save'}</span>
               </button>
             </form>
           ) : (
@@ -729,7 +763,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               >
                 {catalogProducts.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {isRealImage(p.image) ? '📸' : p.image} {p.name} (${p.price.toFixed(2)})
+                    {p.name} (${p.price.toFixed(2)})
                   </option>
                 ))}
               </select>
@@ -737,9 +771,10 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
                 type="button"
                 disabled={isTraining}
                 onClick={() => handleQuickTrain()}
-                className="w-full sm:w-auto min-h-[40px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-xs"
+                className="w-full sm:w-auto min-h-[40px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-xs flex items-center justify-center space-x-1.5"
               >
-                {isTraining ? '⏳...' : '📸 Update'}
+                <CameraIcon className="w-4 h-4" />
+                <span>{isTraining ? 'Saving...' : 'Update'}</span>
               </button>
             </div>
           )}
