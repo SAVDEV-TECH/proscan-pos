@@ -6,6 +6,7 @@ import { ProductDisplay } from '../../components/ProductDisplay';
 import { CartSummary } from '../../components/CartSummary';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { useScanHandler } from '../../lib/useScanHandler';
+import { getProductPhoto } from '../../lib/products';
 
 const CameraScanner = lazy(() =>
   import('../../components/ScannerComponent').then((m) => ({ default: m.CameraScanner }))
@@ -27,7 +28,15 @@ function ScannerContent() {
         {recentlyAdded && (
           <div className="mb-6 p-4 bg-emerald-600 text-white rounded-2xl shadow-xl flex items-center justify-between border-2 border-emerald-400 animate-pulse">
             <div className="flex items-center space-x-3">
-              <span className="text-4xl">{recentlyAdded.image}</span>
+              {getProductPhoto(recentlyAdded) ? (
+                <img
+                  src={getProductPhoto(recentlyAdded)!}
+                  alt={recentlyAdded.name}
+                  className="w-14 h-14 rounded-xl object-cover border-2 border-white shadow-md shrink-0"
+                />
+              ) : (
+                <span className="text-4xl">{recentlyAdded.image}</span>
+              )}
               <div>
                 <p className="font-bold text-lg">🛒 Added {recentlyAdded.name} to cart!</p>
                 <p className="text-emerald-100 text-sm font-medium">Price: ${recentlyAdded.price.toFixed(2)} • Category: {recentlyAdded.category}</p>

@@ -2,15 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useBackendDetection } from '@/lib/useBackendDetection';
-import { Product } from '@/lib/products';
+import { Product, getProductPhoto, isRealImage } from '@/lib/products';
 import { fetchProducts } from '@/lib/api';
 
 interface CameraScannerProps {
   onScan: (barcodeOrId: string, productDetails?: Product) => void;
   isScanning: boolean;
 }
-
-const EMOJI_CHOICES = ['🧴', '🧼', '🧽', '📦', '💧', '🥤', '🍜', '🍅', '🥛', '🍎', '🍌', '🍊', '☕', '🥪', '📓', '📱'];
 
 export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -19,7 +17,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const [backendStatus, setBackendStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [isCapturing, setIsCapturing] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
-  const [lastScannedName, setLastScannedName] = useState<string | null>(null);
+  const [lastScannedProduct, setLastScannedProduct] = useState<Product | null>(null);
   const [productNotFound, setProductNotFound] = useState(false);
   const [activeTier, setActiveTier] = useState<string>('3-Tier Auto-POS Ready');
 
@@ -31,7 +29,6 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const [newProdName, setNewProdName] = useState('');
   const [newProdPrice, setNewProdPrice] = useState('');
   const [newProdCategory, setNewProdCategory] = useState('Household & Cleaning');
-  const [newProdEmoji, setNewProdEmoji] = useState('🧴');
   const [isTraining, setIsTraining] = useState(false);
   const [trainFeedback, setTrainFeedback] = useState<string | null>(null);
 
@@ -151,13 +148,13 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
       cooldownRef.current = true;
       setProductNotFound(false);
       if (tierLabel) setActiveTier(tierLabel);
-      setLastScannedName(`${product.image} ${product.name} — $${product.price.toFixed(2)}`);
+      setLastScannedProduct(product);
 
       onScan(product.id, product);
 
       setTimeout(() => {
         cooldownRef.current = false;
-        setLastScannedName(null);
+        setLastScannedProduct(null);
       }, 2200);
     },
     [onScan]
@@ -299,7 +296,6 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         name: newProdName.trim(),
         price: parseFloat(newProdPrice),
         category: newProdCategory.trim() || 'Household & Cleaning',
-        image_emoji: newProdEmoji || '🧴',
         frame_base64: frame1,
         extra_frames: extraFrames,
       });
@@ -387,18 +383,18 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div
             className={`w-72 h-52 border-2 rounded-2xl transition-all duration-200 relative flex items-center justify-center ${
-              lastScannedName
+              lastScannedProduct
                 ? 'border-emerald-400 bg-emerald-500/15 scale-105 shadow-[0_0_30px_rgba(16,185,129,0.5)]'
                 : isCapturing
                 ? 'border-indigo-400/90 border-dashed'
                 : 'border-white/30'
             }`}
           >
-            {isCapturing && !lastScannedName && (
+            {isCapturing && !lastScannedProduct && (
               <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent opacity-80 animate-pulse" />
             )}
             <span className="absolute -bottom-7 text-[11px] font-bold uppercase tracking-wider text-white bg-black/75 px-3 py-1 rounded-full shadow">
-              {lastScannedName
+              {lastScannedProduct
                 ? '✅ Product Matched!'
                 : productNotFound
                 ? '🔍 Product not found — Center item in box or Train below'
@@ -407,12 +403,22 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           </div>
         </div>
 
-        {/* Instant Detection Flash Banner */}
-        {lastScannedName && (
+        {/* Instant Detection Flash Banner with Real Captured Product Photo */}
+        {lastScannedProduct && (
           <div className="absolute top-4 left-4 right-4 bg-emerald-600/95 backdrop-blur-md text-white px-4 py-2.5 rounded-lg shadow-xl flex items-center justify-between animate-bounce">
-            <div className="flex items-center space-x-2 font-bold text-sm sm:text-base">
-              <span>✅ BEEP! ADDED:</span>
-              <span>{lastScannedName}</span>
+            <div className="flex items-center space-x-3 font-bold text-sm sm:text-base">
+              {getProductPhoto(lastScannedProduct) ? (
+                <img
+                  src={getProductPhoto(lastScannedProduct)!}
+                  alt={lastScannedProduct.name}
+                  className="w-11 h-11 rounded-lg object-cover border-2 border-white shadow-md shrink-0"
+                />
+              ) : (
+                <span className="text-2xl">{lastScannedProduct.image}</span>
+              )}
+              <span>
+                ✅ ADDED: {lastScannedProduct.name} — ${lastScannedProduct.price.toFixed(2)}
+              </span>
             </div>
             <span className="text-xs bg-emerald-800 px-2 py-1 rounded font-semibold uppercase tracking-wider">
               Auto-Cart
@@ -421,7 +427,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         )}
 
         {/* Product Not Found Subtle Indicator (No human distraction) */}
-        {!lastScannedName && productNotFound && isCapturing && (
+        {!lastScannedProduct && productNotFound && isCapturing && (
           <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-sm text-amber-300 border border-amber-400/30 px-3 py-1 rounded-full text-xs font-semibold">
             🔍 Product not found
           </div>
@@ -593,30 +599,16 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
-                <div className="flex items-center gap-1 flex-wrap">
-                  <span className="text-xs font-bold text-indigo-900 mr-1">Icon:</span>
-                  {EMOJI_CHOICES.map((em) => (
-                    <button
-                      type="button"
-                      key={em}
-                      onClick={() => setNewProdEmoji(em)}
-                      className={`text-base p-1 rounded-lg transition-transform ${
-                        newProdEmoji === em
-                          ? 'bg-indigo-600 scale-110 shadow-sm'
-                          : 'bg-white/70 hover:bg-white'
-                      }`}
-                    >
-                      {em}
-                    </button>
-                  ))}
-                </div>
+                <span className="text-xs font-semibold text-indigo-800">
+                  📷 Live camera snapshot of your product will be saved as its real picture
+                </span>
 
                 <button
                   type="submit"
                   disabled={isTraining}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold px-5 py-2.5 rounded-xl text-sm shadow-md transition-all shrink-0"
                 >
-                  {isTraining ? '⏳ Training 3 Angles...' : '📸 Capture, Train & Save to Backend'}
+                  {isTraining ? '⏳ Capturing Photo & Training...' : '📸 Capture Real Photo, Train & Save'}
                 </button>
               </div>
             </form>
@@ -629,7 +621,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               >
                 {catalogProducts.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.image} {p.name} — ${p.price.toFixed(2)}{' '}
+                    {isRealImage(p.image) ? '📸' : p.image} {p.name} — ${p.price.toFixed(2)}{' '}
                     {p.has_visual_fingerprint ? ' (✅ Visually Trained)' : ''}
                   </option>
                 ))}

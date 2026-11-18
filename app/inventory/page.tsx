@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
-import { Product } from '@/lib/products';
+import { Product, getProductPhoto } from '@/lib/products';
 import { fetchProducts, createProduct, updateProduct, deleteProduct, fetchDetectionClasses } from '@/lib/api';
 
 const EMOJI_OPTIONS = ['🍎', '🍌', '🍊', '💧', '☕', '🥪', '🍜', '🍅', '🥛', '🍫', '🥤', '🍕', '🍰', '📓', '📱', '📦', '🧴', '🍪'];
@@ -294,11 +294,11 @@ export default function InventoryDashboard() {
                   filteredProducts.map((p) => (
                     <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-6 py-4 flex items-center space-x-3">
-                        {p.reference_image ? (
+                        {getProductPhoto(p) ? (
                           <img
-                            src={p.reference_image}
+                            src={getProductPhoto(p)!}
                             alt={p.name}
-                            className="w-11 h-11 rounded-lg object-cover border border-indigo-200 shadow-sm shrink-0"
+                            className="w-12 h-12 rounded-xl object-cover border border-indigo-200 shadow-sm shrink-0"
                           />
                         ) : (
                           <span className="text-2xl p-1.5 bg-slate-100 rounded-lg">{p.image}</span>

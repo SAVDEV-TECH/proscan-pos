@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { getProductById, getProductByBarcode, Product } from '@/lib/products';
+import { getProductById, getProductByBarcode, getProductPhoto, Product } from '@/lib/products';
 import { useCart } from '@/context/CartContext';
 import { playSupermarketBeep } from '@/lib/audio';
 
@@ -15,7 +15,6 @@ export function useScanHandler() {
     (identifier: string, explicitProduct?: Product) => {
       setIsLoading(true);
 
-      // Resolve product: use direct object from backend or lookup in catalog
       const found = explicitProduct ??
                     getProductById(identifier) ??
                     getProductByBarcode(identifier) ??
@@ -25,20 +24,19 @@ export function useScanHandler() {
       setIsLoading(false);
 
       if (found) {
-        // 1. Play the crisp supermarket checkout beep
         playSupermarketBeep();
 
-        // 2. Add product directly to cart
+        const displayImage = getProductPhoto(found) || found.image;
+
         addItem({
           id: found.id,
           name: found.name,
           price: found.price,
-          image: found.image,
+          image: displayImage,
           barcode: found.barcode,
         });
 
-        // 3. Set temporary visual notification banner
-        setRecentlyAdded(found);
+        setRecentlyAdded({ ...found, image: displayImage });
         setTimeout(() => {
           setRecentlyAdded((current) => (current?.id === found.id ? null : current));
         }, 3500);

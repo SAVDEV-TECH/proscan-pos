@@ -1,6 +1,6 @@
 'use client';
 
-import { Product } from '@/lib/products';
+import { Product, getProductPhoto } from '@/lib/products';
 import { useCart } from '@/context/CartContext';
 
 interface ProductDisplayProps {
@@ -26,7 +26,7 @@ export function ProductDisplay({
         id: product.id,
         name: product.name,
         price: product.price,
-        image: product.image,
+        image: getProductPhoto(product) || product.image,
         barcode: product.barcode,
       });
     }
@@ -47,14 +47,26 @@ export function ProductDisplay({
       <div className="card text-center py-8 text-gray-500">
         <div className="text-4xl mb-2">📦</div>
         <p>No product scanned yet</p>
-        <p className="text-sm">Scan a barcode or use camera to see product details</p>
+        <p className="text-sm">Show a product to the camera to see its photo and price</p>
       </div>
     );
   }
 
+  const realPhoto = getProductPhoto(product);
+
   return (
     <div className="card space-y-4">
-      <div className="text-6xl text-center mb-4">{product.image}</div>
+      <div className="flex justify-center mb-4">
+        {realPhoto ? (
+          <img
+            src={realPhoto}
+            alt={product.name}
+            className="w-44 h-44 rounded-2xl object-cover border-2 border-emerald-400 shadow-lg"
+          />
+        ) : (
+          <div className="text-6xl text-center">{product.image}</div>
+        )}
+      </div>
 
       <div>
         <h2 className="text-2xl font-bold text-gray-900">{product.name}</h2>

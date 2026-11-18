@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useCart } from '@/context/CartContext';
+import { isRealImage } from '@/lib/products';
 
 export function CartSummary() {
   const { items, total, itemCount, updateQuantity, removeItem, clearCart } = useCart();
@@ -62,7 +63,15 @@ export function CartSummary() {
                 className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200"
               >
                 <div className="flex items-center space-x-2.5 min-w-0">
-                  <span className="text-2xl shrink-0">{item.image}</span>
+                  {isRealImage(item.image) ? (
+                    <img
+                      src={item.image}
+                      alt={item.name}
+                      className="w-11 h-11 rounded-lg object-cover border border-slate-300 shadow-sm shrink-0"
+                    />
+                  ) : (
+                    <span className="text-2xl shrink-0">{item.image}</span>
+                  )}
                   <div className="truncate">
                     <p className="font-bold text-gray-900 text-sm truncate">{item.name}</p>
                     <p className="text-xs text-emerald-700 font-semibold">

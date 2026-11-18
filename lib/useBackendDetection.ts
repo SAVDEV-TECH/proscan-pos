@@ -200,16 +200,16 @@ function computeMultiScaleDescriptors(img: HTMLImageElement): number[][] {
 
 function makeThumbnailDataUrl(img: HTMLImageElement): string {
   const canvas = document.createElement('canvas');
-  canvas.width = 96;
-  canvas.height = 96;
+  canvas.width = 240;
+  canvas.height = 240;
   const ctx = canvas.getContext('2d');
   if (!ctx) return '';
-  const sw = img.width * 0.55;
-  const sh = img.height * 0.55;
+  const sw = img.width * 0.62;
+  const sh = img.height * 0.62;
   const sx = (img.width - sw) / 2;
   const sy = (img.height - sh) / 2;
-  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 96, 96);
-  return canvas.toDataURL('image/jpeg', 0.8);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 240, 240);
+  return canvas.toDataURL('image/jpeg', 0.86);
 }
 
 function cosineSim(a: number[], b: number[]): number {
@@ -471,6 +471,7 @@ export function useBackendDetection(backendUrl: string = DEFAULT_BACKEND_URL) {
         if (payload.product_id) {
           saveStoredEmbeddings(payload.product_id, allVectors);
           const updated = await updateProduct(payload.product_id, {
+            image: thumbUrl || undefined,
             has_visual_fingerprint: true,
             reference_image: thumbUrl,
             visual_embeddings: allVectors,
@@ -481,7 +482,7 @@ export function useBackendDetection(backendUrl: string = DEFAULT_BACKEND_URL) {
             name: payload.name,
             price: payload.price,
             category: payload.category || 'Household & Grocery',
-            image: payload.image_emoji || '🧴',
+            image: thumbUrl || payload.image_emoji || '🧴',
             barcode: payload.barcode || String(Math.floor(100000000000 + Math.random() * 900000000000)),
             has_visual_fingerprint: true,
             reference_image: thumbUrl,

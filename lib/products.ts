@@ -12,6 +12,18 @@ export interface Product {
   visual_embeddings?: number[][];
 }
 
+export function isRealImage(src?: string): boolean {
+  if (!src) return false;
+  return src.startsWith('data:image') || src.startsWith('http://') || src.startsWith('https://') || src.startsWith('/');
+}
+
+export function getProductPhoto(product?: { image?: string; reference_image?: string } | null): string | null {
+  if (!product) return null;
+  if (isRealImage(product.reference_image)) return product.reference_image!;
+  if (isRealImage(product.image)) return product.image!;
+  return null;
+}
+
 export const PRODUCTS: Product[] = [
   {
     id: "prod-001",
