@@ -85,6 +85,8 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     };
   }, [checkBackendHealth, selectedProductId]);
 
+  const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
+
   // Initialize camera stream
   useEffect(() => {
     if (!isScanning) return;
@@ -92,9 +94,13 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
     const startCamera = async () => {
       try {
+        if (videoEl?.srcObject) {
+          const oldTracks = (videoEl.srcObject as MediaStream).getTracks();
+          oldTracks.forEach((track) => track.stop());
+        }
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: 'environment',
+            facingMode: cameraFacing,
             width: { ideal: 640 },
             height: { ideal: 480 },
           },
@@ -118,7 +124,14 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         tracks.forEach((track) => track.stop());
       }
     };
-  }, [isScanning]);
+  }, [isScanning, cameraFacing]);
+
+  // Collapse train panel by default on small mobile screens to keep scanner + product in view
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 640) {
+      setShowTrainPanel(false);
+    }
+  }, []);
 
   // Helper to capture a clean 480x360 JPEG frame from the video feed
   const captureCleanFrameBase64 = useCallback((): string | null => {
@@ -330,10 +343,10 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3.5 sm:space-y-4">
       {/* Status Bar */}
       <div
-        className={`px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-between shadow-sm transition-colors ${
+        className={`px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex flex-wrap items-center justify-between gap-2 shadow-sm transition-colors ${
           backendStatus === 'connected'
             ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
             : backendStatus === 'checking'
@@ -341,34 +354,34 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
             : 'bg-rose-100 text-rose-900 border border-rose-300'
         }`}
       >
-        <div className="flex items-center space-x-2">
-          <span className="text-lg">
+        <div className="flex items-center space-x-2 min-w-0">
+          <span className="text-base sm:text-lg shrink-0">
             {backendStatus === 'connected' ? '🟢' : backendStatus === 'checking' ? '🟡' : '🔴'}
           </span>
-          <span>
+          <span className="truncate">
             {backendStatus === 'connected'
-              ? `POS Scanner Online • ${activeTier}`
+              ? `POS Online • ${activeTier}`
               : backendStatus === 'checking'
               ? 'Starting POS Vision Engine...'
               : 'POS Engine Offline'}
           </span>
         </div>
         {isDetecting && (
-          <span className="text-xs bg-emerald-200 text-emerald-800 px-2.5 py-0.5 rounded-full font-mono animate-pulse">
-            ⚡ Scanning Product...
+          <span className="text-[11px] sm:text-xs bg-emerald-200 text-emerald-800 px-2.5 py-0.5 rounded-full font-mono animate-pulse shrink-0">
+            ⚡ Scanning...
           </span>
         )}
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-300 text-red-800 px-4 py-3 rounded-lg text-sm flex items-center space-x-2">
-          <span>⚠️</span>
-          <span>{error}</span>
+        <div className="bg-red-50 border border-red-300 text-red-800 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm flex items-center space-x-2">
+          <span className="shrink-0">⚠️</span>
+          <span className="break-words">{error}</span>
         </div>
       )}
 
       {/* Video Viewport */}
-      <div className="relative bg-zinc-950 rounded-xl overflow-hidden aspect-video border-2 border-zinc-800 shadow-inner">
+      <div className="relative bg-zinc-950 rounded-xl overflow-hidden aspect-[4/3] sm:aspect-video min-h-[220px] border-2 border-zinc-800 shadow-inner">
         <video
           ref={videoRef}
           autoPlay
@@ -379,10 +392,10 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         />
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Product Reticle Box */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        {/* Product Reticle Box — responsive so it never clips on small mobile screens */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6 sm:p-8">
           <div
-            className={`w-72 h-52 border-2 rounded-2xl transition-all duration-200 relative flex items-center justify-center ${
+            className={`w-full max-w-[16rem] sm:max-w-[18rem] h-full max-h-[9.5rem] sm:max-h-[13rem] border-2 rounded-2xl transition-all duration-200 relative flex items-center justify-center ${
               lastScannedProduct
                 ? 'border-emerald-400 bg-emerald-500/15 scale-105 shadow-[0_0_30px_rgba(16,185,129,0.5)]'
                 : isCapturing
@@ -393,11 +406,11 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
             {isCapturing && !lastScannedProduct && (
               <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent opacity-80 animate-pulse" />
             )}
-            <span className="absolute -bottom-7 text-[11px] font-bold uppercase tracking-wider text-white bg-black/75 px-3 py-1 rounded-full shadow">
+            <span className="absolute bottom-2 max-w-[92%] truncate text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-white bg-black/75 px-2.5 py-0.5 sm:px-3 sm:py-1 rounded-full shadow">
               {lastScannedProduct
                 ? '✅ Product Matched!'
                 : productNotFound
-                ? '🔍 Product not found — Center item in box or Train below'
+                ? '🔍 Center item or Train below'
                 : 'Place Product Inside Box'}
             </span>
           </div>
@@ -405,22 +418,22 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
         {/* Instant Detection Flash Banner with Real Captured Product Photo */}
         {lastScannedProduct && (
-          <div className="absolute top-4 left-4 right-4 bg-emerald-600/95 backdrop-blur-md text-white px-4 py-2.5 rounded-lg shadow-xl flex items-center justify-between animate-bounce">
-            <div className="flex items-center space-x-3 font-bold text-sm sm:text-base">
+          <div className="absolute top-2.5 left-2.5 right-2.5 sm:top-4 sm:left-4 sm:right-4 bg-emerald-600/95 backdrop-blur-md text-white px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl shadow-xl flex items-center justify-between gap-2 animate-bounce">
+            <div className="flex items-center space-x-2.5 font-bold text-xs sm:text-base min-w-0">
               {getProductPhoto(lastScannedProduct) ? (
                 <img
                   src={getProductPhoto(lastScannedProduct)!}
                   alt={lastScannedProduct.name}
-                  className="w-11 h-11 rounded-lg object-cover border-2 border-white shadow-md shrink-0"
+                  className="w-9 h-9 sm:w-11 sm:h-11 rounded-lg object-cover border-2 border-white shadow-md shrink-0"
                 />
               ) : (
-                <span className="text-2xl">{lastScannedProduct.image}</span>
+                <span className="text-xl sm:text-2xl shrink-0">{lastScannedProduct.image}</span>
               )}
-              <span>
-                ✅ ADDED: {lastScannedProduct.name} — ${lastScannedProduct.price.toFixed(2)}
+              <span className="truncate">
+                ✅ {lastScannedProduct.name} — ${lastScannedProduct.price.toFixed(2)}
               </span>
             </div>
-            <span className="text-xs bg-emerald-800 px-2 py-1 rounded font-semibold uppercase tracking-wider">
+            <span className="hidden sm:inline-block text-xs bg-emerald-800 px-2 py-1 rounded font-semibold uppercase tracking-wider shrink-0">
               Auto-Cart
             </span>
           </div>
@@ -428,33 +441,47 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
         {/* Product Not Found Subtle Indicator (No human distraction) */}
         {!lastScannedProduct && productNotFound && isCapturing && (
-          <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-sm text-amber-300 border border-amber-400/30 px-3 py-1 rounded-full text-xs font-semibold">
-            🔍 Product not found
+          <div className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 bg-slate-900/80 backdrop-blur-sm text-amber-300 border border-amber-400/30 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-semibold">
+            🔍 Not found
           </div>
         )}
 
-        {/* Live Scanner Indicator */}
-        <div className="absolute bottom-3 left-3">
-          {isCapturing ? (
-            <div className="flex items-center space-x-2 bg-black/75 backdrop-blur-sm px-3 py-1.5 rounded-full">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
-              <span className="text-white text-xs font-semibold">Hands-Free Product Focus ON</span>
-            </div>
-          ) : (
-            <div className="bg-black/60 px-3 py-1.5 rounded-full text-white/70 text-xs">
-              Scanner Paused
-            </div>
-          )}
+        {/* Bottom Overlay Bar: Live Scanner Indicator + Flip Camera Button */}
+        <div className="absolute bottom-2.5 left-2.5 right-2.5 sm:bottom-3 sm:left-3 sm:right-3 flex items-center justify-between gap-2 pointer-events-none">
+          <div>
+            {isCapturing ? (
+              <div className="flex items-center space-x-1.5 sm:space-x-2 bg-black/75 backdrop-blur-sm px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full">
+                <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-500 animate-ping shrink-0" />
+                <span className="text-white text-[11px] sm:text-xs font-semibold truncate">
+                  Auto-Focus ON
+                </span>
+              </div>
+            ) : (
+              <div className="bg-black/60 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full text-white/70 text-[11px] sm:text-xs">
+                Scanner Paused
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setCameraFacing((prev) => (prev === 'environment' ? 'user' : 'environment'))}
+            className="pointer-events-auto bg-black/75 hover:bg-black/90 active:scale-95 text-white text-[11px] sm:text-xs font-semibold px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-full border border-white/20 backdrop-blur-sm transition-all flex items-center space-x-1"
+            title="Switch Front/Back Camera"
+          >
+            <span>🔄</span>
+            <span>Flip Cam</span>
+          </button>
         </div>
       </div>
 
       {/* Live Frame Telemetry (Humans filtered out) */}
       {lastDetection && lastDetection.detections.length > 0 && (
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-          <p className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 sm:p-3">
+          <p className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
             Detected Product Candidates:
           </p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2">
             {lastDetection.detections.map((det, i) => (
               <span
                 key={i}
@@ -464,7 +491,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
                     : 'bg-zinc-100 text-zinc-700'
                 }`}
               >
-                <span>{det.product_name ?? det.class_name}</span>
+                <span className="truncate max-w-[140px] sm:max-w-none">{det.product_name ?? det.class_name}</span>
                 <span className="opacity-60 text-[10px]">
                   ({(det.confidence * 100).toFixed(0)}%)
                 </span>
@@ -480,11 +507,11 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
       )}
 
       {/* Primary POS Controls */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
         <button
           onClick={isCapturing ? stopCapturing : startCapturing}
           disabled={backendStatus !== 'connected'}
-          className={`py-3 px-4 rounded-xl font-bold text-sm transition-all shadow-md flex items-center justify-center space-x-2 ${
+          className={`min-h-[44px] py-2.5 px-3 sm:py-3 sm:px-4 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] flex items-center justify-center space-x-1.5 ${
             backendStatus !== 'connected'
               ? 'bg-zinc-200 text-zinc-400 cursor-not-allowed shadow-none'
               : isCapturing
@@ -492,69 +519,69 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               : 'bg-emerald-600 hover:bg-emerald-700 text-white'
           }`}
         >
-          <span>{isCapturing ? '⏹️ Pause Auto-Scan' : '▶️ Resume Auto-Scan'}</span>
-        </button>
-
-        <button
-          onClick={() => setShowTrainPanel((prev) => !prev)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-4 rounded-xl font-bold text-sm transition-all shadow-md flex items-center justify-center space-x-2"
-        >
-          <span>🎯 {showTrainPanel ? 'Hide Product Trainer' : 'Train / Add Product'}</span>
+          <span>{isCapturing ? '⏹️ Pause Scan' : '▶️ Resume Scan'}</span>
         </button>
 
         <button
           onClick={simulateBarcodeScan}
-          className="bg-zinc-800 hover:bg-zinc-900 text-white py-3 px-4 rounded-xl font-bold text-sm transition-all shadow-md flex items-center justify-center space-x-2"
+          className="min-h-[44px] bg-zinc-800 hover:bg-zinc-900 text-white py-2.5 px-3 sm:py-3 sm:px-4 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] flex items-center justify-center space-x-1.5"
         >
-          <span>📋 Simulate POS Scan</span>
+          <span>📋 Simulate Scan</span>
+        </button>
+
+        <button
+          onClick={() => setShowTrainPanel((prev) => !prev)}
+          className="col-span-2 sm:col-span-1 min-h-[44px] bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 px-3 sm:py-3 sm:px-4 rounded-xl font-bold text-xs sm:text-sm transition-all shadow-md active:scale-[0.98] flex items-center justify-center space-x-1.5"
+        >
+          <span>🎯 {showTrainPanel ? 'Hide Trainer' : 'Train / Add Product'}</span>
         </button>
       </div>
 
       {/* Live Camera Product Capture, Training & Backend Registration Panel */}
       {showTrainPanel && (
-        <div className="bg-indigo-50/95 border-2 border-indigo-200 rounded-2xl p-4 space-y-3 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="bg-indigo-50/95 border-2 border-indigo-200 rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
             <div>
               <h4 className="font-extrabold text-indigo-950 text-sm sm:text-base flex items-center gap-1.5">
                 <span>📸</span>
-                <span>Train &amp; Add Product from Camera (Saves to Backend Catalog)</span>
+                <span>Train &amp; Add Product from Camera</span>
               </h4>
               <p className="text-xs text-indigo-800 mt-0.5">
-                Hold your product (e.g. <strong>VIVE Detergent</strong>) inside the center camera box above, enter its details below, and click{' '}
+                Hold your product inside the center box above, enter details below, and tap{' '}
                 <strong>Capture, Train &amp; Save</strong>.
               </p>
             </div>
 
-            <div className="flex space-x-1.5 text-xs font-bold shrink-0">
+            <div className="grid grid-cols-2 sm:flex gap-1.5 text-xs font-bold shrink-0">
               <button
                 type="button"
                 onClick={() => setTrainMode('new')}
-                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                className={`px-3 py-2 sm:py-1.5 rounded-lg transition-colors text-center ${
                   trainMode === 'new'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-white text-indigo-700 border border-indigo-200'
                 }`}
               >
-                ➕ Train New Product
+                ➕ Train New
               </button>
               <button
                 type="button"
                 onClick={() => setTrainMode('existing')}
-                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                className={`px-3 py-2 sm:py-1.5 rounded-lg transition-colors text-center ${
                   trainMode === 'existing'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-white text-indigo-700 border border-indigo-200'
                 }`}
               >
-                🔄 Re-Train Existing
+                🔄 Re-Train
               </button>
             </div>
           </div>
 
           {trainMode === 'new' ? (
             <form onSubmit={handleQuickTrain} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                <div className="sm:col-span-5">
+              <div className="grid grid-cols-2 sm:grid-cols-12 gap-2.5">
+                <div className="col-span-2 sm:col-span-5">
                   <label className="block text-[11px] font-bold text-indigo-900 uppercase mb-1">
                     Product Name *
                   </label>
@@ -564,11 +591,11 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
                     placeholder="e.g. VIVE Detergent"
                     value={newProdName}
                     onChange={(e) => setNewProdName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3 py-2.5 sm:py-2 rounded-lg border border-indigo-300 text-base sm:text-sm bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
 
-                <div className="sm:col-span-3">
+                <div className="col-span-1 sm:col-span-3">
                   <label className="block text-[11px] font-bold text-indigo-900 uppercase mb-1">
                     Price ($) *
                   </label>
@@ -577,52 +604,52 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
                     step="0.01"
                     min="0"
                     required
-                    placeholder="e.g. 2.50"
+                    placeholder="2.50"
                     value={newProdPrice}
                     onChange={(e) => setNewProdPrice(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3 py-2.5 sm:py-2 rounded-lg border border-indigo-300 text-base sm:text-sm bg-white text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
 
-                <div className="sm:col-span-4">
+                <div className="col-span-1 sm:col-span-4">
                   <label className="block text-[11px] font-bold text-indigo-900 uppercase mb-1">
                     Category
                   </label>
                   <input
                     type="text"
-                    placeholder="Household & Cleaning"
+                    placeholder="Household"
                     value={newProdCategory}
                     onChange={(e) => setNewProdCategory(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3 py-2.5 sm:py-2 rounded-lg border border-indigo-300 text-base sm:text-sm bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1">
                 <span className="text-xs font-semibold text-indigo-800">
-                  📷 Live camera snapshot of your product will be saved as its real picture
+                  📷 Live camera snapshot will be saved as product photo
                 </span>
 
                 <button
                   type="submit"
                   disabled={isTraining}
-                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold px-5 py-2.5 rounded-xl text-sm shadow-md transition-all shrink-0"
+                  className="w-full sm:w-auto min-h-[44px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold px-5 py-2.5 rounded-xl text-sm shadow-md active:scale-[0.98] transition-all shrink-0"
                 >
-                  {isTraining ? '⏳ Capturing Photo & Training...' : '📸 Capture Real Photo, Train & Save'}
+                  {isTraining ? '⏳ Capturing & Training...' : '📸 Capture, Train & Save'}
                 </button>
               </div>
             </form>
           ) : (
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="flex flex-col sm:flex-row gap-2.5">
               <select
                 value={selectedProductId}
                 onChange={(e) => setSelectedProductId(e.target.value)}
-                className="flex-1 px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white font-medium text-slate-900"
+                className="flex-1 px-3 py-2.5 sm:py-2 rounded-lg border border-indigo-300 text-base sm:text-sm bg-white font-medium text-slate-900"
               >
                 {catalogProducts.map((p) => (
                   <option key={p.id} value={p.id}>
                     {isRealImage(p.image) ? '📸' : p.image} {p.name} — ${p.price.toFixed(2)}{' '}
-                    {p.has_visual_fingerprint ? ' (✅ Visually Trained)' : ''}
+                    {p.has_visual_fingerprint ? ' (✅ Trained)' : ''}
                   </option>
                 ))}
               </select>
@@ -630,15 +657,15 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
                 type="button"
                 disabled={isTraining}
                 onClick={() => handleQuickTrain()}
-                className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-5 py-2 rounded-xl text-sm shadow"
+                className="w-full sm:w-auto min-h-[44px] bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-5 py-2.5 rounded-xl text-sm shadow active:scale-[0.98]"
               >
-                {isTraining ? '⏳ Training...' : '📸 Capture & Update Fingerprint'}
+                {isTraining ? '⏳ Training...' : '📸 Capture & Update'}
               </button>
             </div>
           )}
 
           {trainFeedback && (
-            <div className="text-xs font-bold text-indigo-950 bg-white px-3.5 py-2.5 rounded-xl border border-indigo-200 shadow-sm">
+            <div className="text-xs font-bold text-indigo-950 bg-white px-3.5 py-2.5 rounded-xl border border-indigo-200 shadow-sm break-words">
               {trainFeedback}
             </div>
           )}
