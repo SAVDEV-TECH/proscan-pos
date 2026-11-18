@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react';
 import { getProductById, getProductByBarcode, getProductPhoto, Product } from '@/lib/products';
 import { useCart } from '@/context/CartContext';
-import { playSupermarketBeep } from '@/lib/audio';
+import { playSupermarketBeep, speakPosAnnouncement } from '@/lib/audio';
 
 export function useScanHandler() {
   const [scannedProduct, setScannedProduct] = useState<Product | null>(null);
@@ -25,6 +25,7 @@ export function useScanHandler() {
 
       if (found) {
         playSupermarketBeep();
+        speakPosAnnouncement(`${found.name}, $${found.price.toFixed(2)}`);
 
         const displayImage = getProductPhoto(found) || found.image;
 
