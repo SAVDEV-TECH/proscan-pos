@@ -157,46 +157,46 @@ export default function InventoryDashboard() {
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-16">
       {/* Top Navbar */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-2.5 sm:py-0 sm:h-16 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+        <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 h-14 flex items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 min-w-0">
             <Link
               href="/"
-              className="font-bold text-lg sm:text-xl text-indigo-600 hover:text-indigo-700 flex items-center space-x-1.5 shrink-0"
+              className="font-bold text-base sm:text-lg text-indigo-600 hover:text-indigo-700 flex items-center space-x-1.5 shrink-0"
             >
               <span>🛒</span>
-              <span>Proscan</span>
+              <span>Proscan POS</span>
             </Link>
             <span className="text-slate-300">/</span>
-            <span className="font-semibold text-slate-800 text-xs sm:text-base truncate">
-              Inventory<span className="hidden sm:inline"> &amp; Catalog Ops</span>
+            <span className="font-semibold text-slate-800 text-xs sm:text-sm truncate">
+              Inventory
             </span>
           </div>
 
-          <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
+          <div className="flex items-center space-x-2 shrink-0">
             <Link
-              href="/?demo=true"
-              className="text-xs sm:text-sm font-semibold text-slate-700 hover:text-indigo-600 px-2.5 sm:px-3 py-1.5 rounded-lg border border-slate-200 hover:border-indigo-300 transition-colors"
+              href="/"
+              className="text-xs sm:text-sm font-semibold text-slate-700 hover:text-indigo-600 px-3 py-1.5 rounded-lg border border-slate-200 hover:border-indigo-300 transition-colors"
             >
-              📱 <span className="hidden xs:inline">Scanner </span>POS
+              📷 Scanner
             </Link>
             <button
               type="button"
               onClick={() => setIsAddModalOpen(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs sm:text-sm font-bold px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg shadow-sm hover:shadow transition-all flex items-center space-x-1"
+              className="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs sm:text-sm font-bold px-3 py-1.5 rounded-lg shadow-sm transition-all flex items-center space-x-1"
             >
               <span>➕</span>
-              <span>Add<span className="hidden sm:inline"> Product</span></span>
+              <span>Add</span>
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Body */}
-      <main className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 pt-5 sm:pt-8">
+      <main className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 pt-4 sm:pt-6">
         {/* Toast Notification */}
         {notification && (
           <div
-            className={`fixed inset-x-4 bottom-4 sm:left-auto sm:right-6 sm:bottom-6 z-50 px-4 sm:px-5 py-3 rounded-xl shadow-2xl font-semibold text-xs sm:text-sm transition-all flex items-center justify-between space-x-2 ${
+            className={`fixed inset-x-4 bottom-4 sm:left-auto sm:right-6 sm:bottom-6 z-50 px-4 py-2.5 rounded-xl shadow-2xl font-semibold text-xs sm:text-sm transition-all flex items-center justify-between space-x-2 ${
               notification.type === 'success'
                 ? 'bg-emerald-600 text-white border border-emerald-400'
                 : 'bg-rose-600 text-white border border-rose-400'
@@ -207,29 +207,25 @@ export default function InventoryDashboard() {
         )}
 
         {/* Dashboard Analytics Bar */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-5 sm:mb-8">
-          <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <p className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">Active SKUs</p>
-            <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1 sm:mt-2">{stats.total}</p>
-            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1 truncate">Live in SQLite DB</p>
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4 sm:mb-6">
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">SKUs</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-1">{stats.total}</p>
           </div>
 
-          <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <p className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">Avg Price</p>
-            <p className="text-2xl sm:text-3xl font-extrabold text-emerald-600 mt-1 sm:mt-2">${stats.avgPrice}</p>
-            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1 truncate">Catalog unit average</p>
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Avg Price</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-emerald-600 mt-1">${stats.avgPrice}</p>
           </div>
 
-          <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <p className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">AI-Mapped</p>
-            <p className="text-2xl sm:text-3xl font-extrabold text-indigo-600 mt-1 sm:mt-2">{stats.mapped}</p>
-            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1 truncate">Linked to YOLO / Cam</p>
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">AI Mapped</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-indigo-600 mt-1">{stats.mapped}</p>
           </div>
 
-          <div className="bg-white p-3.5 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <p className="text-[11px] sm:text-xs font-bold text-slate-500 uppercase tracking-wider">Categories</p>
-            <p className="text-2xl sm:text-3xl font-extrabold text-amber-600 mt-1 sm:mt-2">{stats.categoriesCount}</p>
-            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 sm:mt-1 truncate">Departments</p>
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-sm">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Categories</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-amber-600 mt-1">{stats.categoriesCount}</p>
           </div>
         </section>
 
@@ -238,7 +234,7 @@ export default function InventoryDashboard() {
           <div className="w-full sm:w-80 relative">
             <input
               type="text"
-              placeholder="Search name, barcode, or YOLO label..."
+              placeholder="Search products..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-9 pr-4 py-2.5 sm:py-2 border border-slate-300 rounded-xl text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -460,7 +456,7 @@ export default function InventoryDashboard() {
             <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
               <h2 className="text-base sm:text-lg font-bold text-slate-900 flex items-center space-x-2">
                 <span>➕</span>
-                <span>Add Product to Catalog</span>
+                <span>Add Product</span>
               </h2>
               <button
                 type="button"
@@ -473,11 +469,11 @@ export default function InventoryDashboard() {
 
             <form onSubmit={handleCreate} className="space-y-3.5 pt-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Product Name *</label>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Name *</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Sparkling Lime Water"
+                  placeholder="Sparkling Water"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-3.5 py-2.5 sm:py-2 border border-slate-300 rounded-xl text-base sm:text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
@@ -512,7 +508,7 @@ export default function InventoryDashboard() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">AI Detection Label (YOLO)</label>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">AI Label</label>
                 <select
                   value={formData.yolo_classes}
                   onChange={(e) => setFormData({ ...formData, yolo_classes: e.target.value })}
@@ -524,9 +520,6 @@ export default function InventoryDashboard() {
                     </option>
                   ))}
                 </select>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  When the camera detects this object, this product is automatically selected and added.
-                </p>
               </div>
 
               <div>

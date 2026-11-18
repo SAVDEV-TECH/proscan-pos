@@ -176,7 +176,7 @@ export function CartSummary() {
               : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
           }`}
         >
-          🏷️ {memberDiscountOn ? '10% Member Applied' : '+ 10% Member Promo'}
+          🏷️ {memberDiscountOn ? '10% Promo ON' : '10% Promo'}
         </button>
         <button
           type="button"
@@ -187,30 +187,30 @@ export function CartSummary() {
               : 'bg-slate-50 text-slate-400 border-slate-200'
           }`}
         >
-          {taxEnabled ? '🧾 VAT 7.5% ON' : 'VAT OFF'}
+          {taxEnabled ? '🧾 VAT 7.5%' : 'No VAT'}
         </button>
       </div>
 
       {/* Itemized Subtotal, Discount, Tax & Total */}
       <div className="border-t pt-3 space-y-1.5 text-xs sm:text-sm">
         <div className="flex justify-between text-slate-600">
-          <span>Subtotal ({itemCount} pcs):</span>
+          <span>Subtotal ({itemCount}):</span>
           <span className="font-semibold text-slate-900">${subtotal.toFixed(2)}</span>
         </div>
         {discountAmount > 0 && (
           <div className="flex justify-between text-amber-700 font-semibold">
-            <span>Member Discount (10%):</span>
+            <span>Discount (10%):</span>
             <span>−${discountAmount.toFixed(2)}</span>
           </div>
         )}
         {taxEnabled && (
           <div className="flex justify-between text-slate-500 text-xs">
-            <span>Estimated VAT (7.5%):</span>
+            <span>VAT (7.5%):</span>
             <span>+${taxAmount.toFixed(2)}</span>
           </div>
         )}
         <div className="flex justify-between items-center text-xl sm:text-2xl font-extrabold text-gray-900 bg-emerald-50 p-3 rounded-xl border border-emerald-200 mt-1">
-          <span>TOTAL:</span>
+          <span>TOTAL</span>
           <span className="text-emerald-700">${finalTotal.toFixed(2)}</span>
         </div>
       </div>
@@ -237,9 +237,9 @@ export function CartSummary() {
       {paymentMethod === 'Cash' && (
         <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-2.5 space-y-2">
           <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-amber-950">💵 Cash Tendered:</span>
+            <span className="font-bold text-amber-950">💵 Tendered:</span>
             <span className="font-extrabold text-emerald-700">
-              Change Due: ${changeDue.toFixed(2)}
+              Change: ${changeDue.toFixed(2)}
             </span>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -279,8 +279,8 @@ export function CartSummary() {
         className="w-full min-h-[48px] py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 active:scale-[0.99] text-white font-extrabold rounded-xl shadow-lg transition-all text-sm sm:text-base"
       >
         {isProcessingPayment
-          ? '⏳ Contacting POS Bank Terminal...'
-          : `✅ Complete Payment ($${finalTotal.toFixed(2)})`}
+          ? '⏳ Processing...'
+          : `✅ Pay $${finalTotal.toFixed(2)}`}
       </button>
     </>
   );
@@ -289,17 +289,14 @@ export function CartSummary() {
     <>
       <div id="pos-register-card" className="card space-y-4">
         <div className="flex items-center justify-between border-b pb-3 gap-2">
-          <div className="min-w-0">
-            <h3 className="text-lg sm:text-xl font-bold text-gray-900 truncate">🛒 POS Register</h3>
-            <p className="text-xs text-gray-500 truncate">Term #04 • Auto-adds on scan</p>
-          </div>
+          <h3 className="text-lg sm:text-xl font-bold text-gray-900 truncate">🛒 Cart</h3>
           <div className="flex items-center gap-1.5 shrink-0">
             {salesHistory.length > 0 && (
               <button
                 type="button"
                 onClick={() => setHistoryOpen(true)}
                 className="text-xs text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-bold px-2.5 py-1.5 rounded-lg border border-indigo-200"
-                title="View Shift Sales & Receipts"
+                title="Sales History"
               >
                 🧾 Sales ({salesHistory.length})
               </button>
@@ -317,15 +314,12 @@ export function CartSummary() {
         </div>
 
         {items.length === 0 ? (
-          <div className="text-center py-6 sm:py-8 text-gray-500">
-            <div className="text-3xl sm:text-4xl mb-2">🛒</div>
-            <p className="font-medium text-gray-700 text-sm sm:text-base">Register Ready for Next Customer</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Scan any product with the camera or tap a Quick-Key — it beeps and adds here automatically!
-            </p>
+          <div className="text-center py-8 text-gray-500">
+            <div className="text-3xl mb-1.5">🛒</div>
+            <p className="font-semibold text-gray-600 text-sm">Cart is empty</p>
             {salesHistory.length > 0 && (
               <p className="text-xs font-bold text-emerald-700 mt-3 bg-emerald-50 inline-block px-3 py-1 rounded-full border border-emerald-200">
-                Shift Total: ${shiftRevenue.toFixed(2)} ({salesHistory.length} receipts)
+                Shift Total: ${shiftRevenue.toFixed(2)}
               </p>
             )}
           </div>
@@ -351,7 +345,7 @@ export function CartSummary() {
               </div>
               <div className="min-w-0">
                 <p className="text-xs font-semibold text-indigo-600 flex items-center gap-1">
-                  <span>Tap to view register</span>
+                  <span>View Cart</span>
                   <span>▲</span>
                 </p>
                 <p className="text-base font-extrabold text-slate-900 truncate">
@@ -366,7 +360,7 @@ export function CartSummary() {
               onClick={handleCheckout}
               className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-extrabold px-4 py-2.5 rounded-xl shadow-md text-xs sm:text-sm shrink-0"
             >
-              {isProcessingPayment ? '⏳ Processing...' : `✅ Pay $${finalTotal.toFixed(2)}`}
+              {isProcessingPayment ? '⏳...' : `✅ Pay $${finalTotal.toFixed(2)}`}
             </button>
           </div>
         </div>
@@ -377,10 +371,7 @@ export function CartSummary() {
         <div className="lg:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end justify-center">
           <div className="bg-white w-full max-h-[88vh] rounded-t-3xl p-4 sm:p-6 shadow-2xl border-t border-slate-200 space-y-4 overflow-y-auto">
             <div className="flex items-center justify-between border-b pb-3">
-              <div>
-                <h3 className="text-lg font-extrabold text-slate-900">🛒 POS Register ({itemCount})</h3>
-                <p className="text-xs text-slate-500">Review items, cash change, or checkout</p>
-              </div>
+              <h3 className="text-lg font-extrabold text-slate-900">🛒 Cart ({itemCount})</h3>
               <div className="flex items-center space-x-2">
                 <button
                   type="button"
