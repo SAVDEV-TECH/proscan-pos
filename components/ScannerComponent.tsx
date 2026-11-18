@@ -28,7 +28,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const [selectedProductId, setSelectedProductId] = useState<string>('prod-001');
   const [newProdName, setNewProdName] = useState('');
   const [newProdPrice, setNewProdPrice] = useState('');
-  const [newProdEmoji, setNewProdEmoji] = useState('📦');
+  const [newProdEmoji] = useState('📦');
   const [trainFeedback, setTrainFeedback] = useState<string | null>(null);
 
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -90,6 +90,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   // Initialize camera stream
   useEffect(() => {
     if (!isScanning) return;
+    const videoEl = videoRef.current;
 
     const startCamera = async () => {
       try {
@@ -114,8 +115,8 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     startCamera();
 
     return () => {
-      if (videoRef.current?.srcObject) {
-        const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+      if (videoEl?.srcObject) {
+        const tracks = (videoEl.srcObject as MediaStream).getTracks();
         tracks.forEach((track) => track.stop());
       }
     };
