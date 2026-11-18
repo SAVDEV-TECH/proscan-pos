@@ -10,6 +10,8 @@ interface CameraScannerProps {
   isScanning: boolean;
 }
 
+const EMOJI_CHOICES = ['🧴', '🧼', '🧽', '📦', '💧', '🥤', '🍜', '🍅', '🥛', '🍎', '🍌', '🍊', '☕', '🥪', '📓', '📱'];
+
 export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -18,17 +20,19 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [lastScannedName, setLastScannedName] = useState<string | null>(null);
-  const [humanWarning, setHumanWarning] = useState(false);
+  const [productNotFound, setProductNotFound] = useState(false);
   const [activeTier, setActiveTier] = useState<string>('3-Tier Auto-POS Ready');
 
-  // Quick-Train Visual Fingerprint Modal State
+  // Live Camera Product Training State (Open by default so new items like VIVE Detergent can be trained immediately)
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
-  const [showTrainPanel, setShowTrainPanel] = useState(false);
-  const [trainMode, setTrainMode] = useState<'existing' | 'new'>('existing');
+  const [showTrainPanel, setShowTrainPanel] = useState(true);
+  const [trainMode, setTrainMode] = useState<'new' | 'existing'>('new');
   const [selectedProductId, setSelectedProductId] = useState<string>('prod-001');
   const [newProdName, setNewProdName] = useState('');
   const [newProdPrice, setNewProdPrice] = useState('');
-  const [newProdEmoji] = useState('📦');
+  const [newProdCategory, setNewProdCategory] = useState('Household & Cleaning');
+  const [newProdEmoji, setNewProdEmoji] = useState('🧴');
+  const [isTraining, setIsTraining] = useState(false);
   const [trainFeedback, setTrainFeedback] = useState<string | null>(null);
 
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -41,14 +45,13 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
   const {
     detectFromBase64,
-    identifyWithCloudAI,
     enrollVisualProduct,
     checkBackendHealth,
     isLoading: isDetecting,
     lastDetection,
   } = useBackendDetection();
 
-  // Initialize native browser BarcodeDetector if available (Chrome / Edge / Android)
+  // Initialize native browser BarcodeDetector if available
   useEffect(() => {
     if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
       try {
@@ -62,25 +65,23 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     }
   }, []);
 
-  // Poll backend health every 4 seconds so it auto-connects when backend starts
+  // Poll health & sync catalog
   useEffect(() => {
     let mounted = true;
     const checkHealth = async () => {
       const isHealthy = await checkBackendHealth();
       if (!mounted) return;
       setBackendStatus(isHealthy ? 'connected' : 'disconnected');
-      if (isHealthy) {
-        const items = await fetchProducts();
-        if (mounted) {
-          setCatalogProducts(items);
-          if (items.length > 0 && !selectedProductId) {
-            setSelectedProductId(items[0].id);
-          }
+      const items = await fetchProducts();
+      if (mounted) {
+        setCatalogProducts(items);
+        if (items.length > 0 && !selectedProductId) {
+          setSelectedProductId(items[0].id);
         }
       }
     };
     checkHealth();
-    const healthTimer = setInterval(checkHealth, 4000);
+    const healthTimer = setInterval(checkHealth, 5000);
     return () => {
       mounted = false;
       clearInterval(healthTimer);
@@ -122,7 +123,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     };
   }, [isScanning]);
 
-  // Helper to capture a clean, properly sized frame from the video feed
+  // Helper to capture a clean 480x360 JPEG frame from the video feed
   const captureCleanFrameBase64 = useCallback((): string | null => {
     const vid = videoRef.current;
     const can = canvasRef.current;
@@ -137,18 +138,18 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     if (!ctx) return null;
 
     ctx.drawImage(vid, 0, 0, CAPTURE_W, CAPTURE_H);
-    const dataUrl = can.toDataURL('image/jpeg', 0.82);
+    const dataUrl = can.toDataURL('image/jpeg', 0.85);
     return dataUrl.length > 500 ? dataUrl : null;
   }, []);
 
-  // Process a matched product -> add to cart with Supermarket Beep & 2.2s same-item cooldown
+  // Process a matched product -> add to cart with Supermarket Beep & 2.2s cooldown
   const triggerProductMatch = useCallback(
     (product: Product, tierLabel?: string) => {
       if (cooldownRef.current) return;
 
       lastDetectedIdRef.current = product.id;
       cooldownRef.current = true;
-      setHumanWarning(false);
+      setProductNotFound(false);
       if (tierLabel) setActiveTier(tierLabel);
       setLastScannedName(`${product.image} ${product.name} — $${product.price.toFixed(2)}`);
 
@@ -162,7 +163,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     [onScan]
   );
 
-  // Core Continuous POS Scan Loop (runs automatically once camera & backend are ready)
+  // Core Continuous POS Scan Loop (ignores humans completely, focuses only on products)
   const startCapturing = useCallback(() => {
     if (captureIntervalRef.current) {
       clearInterval(captureIntervalRef.current);
@@ -177,7 +178,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
       inFlightRef.current = true;
       try {
-        // Tier 1 (Browser Native BarcodeDetector): Check for 1D/2D barcode in <15ms
+        // Tier 1: Browser Native BarcodeDetector
         let detectedBarcode: string | undefined = undefined;
         if (nativeBarcodeDetectorRef.current) {
           try {
@@ -194,55 +195,49 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
               }
             }
           } catch {
-            // Ignore native detector errors on unsupported frames
+            // ignore
           }
         }
 
-        // Capture full-frame 480x360 JPEG without canvas cropping bugs
         const base64Image = captureCleanFrameBase64();
         if (!base64Image) {
           inFlightRef.current = false;
           return;
         }
 
-        // Tier 2: Send to Hybrid YOLOv8 + Visual Fingerprint + Human Filter Backend
-        const result = await detectFromBase64(base64Image, 0.58, detectedBarcode);
-
-        if (result?.human_detected) {
-          candidateIdRef.current = null;
-          candidateHitsRef.current = 0;
-          setLastScannedName(null);
-          setHumanWarning(true);
-          setActiveTier('Safety Filter: Human Not Valid');
-          inFlightRef.current = false;
-          return;
-        } else {
-          setHumanWarning(false);
-        }
+        // Tier 2: Trained Visual Fingerprint + Neural Object Match (humans ignored)
+        const result = await detectFromBase64(base64Image, 0.50, detectedBarcode);
 
         if (result?.primary_product) {
           const prod = result.primary_product;
-          if (result.match_tier?.includes('Barcode') || candidateIdRef.current === prod.id) {
+          setProductNotFound(false);
+
+          const isInstantMatch =
+            result.match_tier?.includes('Barcode') || result.match_tier?.includes('Trained Visual');
+
+          if (isInstantMatch || candidateIdRef.current === prod.id) {
             candidateHitsRef.current += 1;
           } else {
             candidateIdRef.current = prod.id;
             candidateHitsRef.current = 1;
           }
 
-          if (candidateHitsRef.current >= 2 || result.match_tier?.includes('Barcode')) {
+          if (isInstantMatch || candidateHitsRef.current >= 2) {
             candidateHitsRef.current = 0;
             triggerProductMatch(prod, result.match_tier || 'Tier 2: Hybrid AI POS');
           }
         } else {
           candidateIdRef.current = null;
           candidateHitsRef.current = 0;
+          setProductNotFound(true);
+          setActiveTier('Product Not Found');
         }
       } catch (err) {
         console.error('Frame scan error:', err);
       } finally {
         inFlightRef.current = false;
       }
-    }, 450); // Fast 450ms POS polling cycle
+    }, 420);
   }, [catalogProducts, captureCleanFrameBase64, detectFromBase64, triggerProductMatch]);
 
   const stopCapturing = useCallback(() => {
@@ -254,7 +249,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     cooldownRef.current = false;
   }, []);
 
-  // Automatically start continuous scanning as soon as camera + backend are ready!
+  // Automatically start continuous scanning as soon as camera + engine are ready
   useEffect(() => {
     if (cameraReady && backendStatus === 'connected' && !isCapturing) {
       startCapturing();
@@ -266,77 +261,81 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     };
   }, [cameraReady, backendStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Handle 1-Click Visual Fingerprint Training
-  const handleQuickTrain = async () => {
-    const frame = captureCleanFrameBase64();
-    if (!frame) {
-      setTrainFeedback('⚠️ Camera not ready — hold product in view and try again.');
+  // 3-Frame Burst Capture & Visual Training -> Saves to Backend Catalog
+  const handleQuickTrain = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+
+    const frame1 = captureCleanFrameBase64();
+    if (!frame1) {
+      setTrainFeedback('⚠️ Camera feed not ready yet — allow camera access and try again.');
       return;
     }
 
-    setTrainFeedback('⏳ Capturing visual fingerprint...');
-    let trained: Product | null = null;
+    if (trainMode === 'new' && (!newProdName.trim() || !newProdPrice.trim())) {
+      setTrainFeedback('⚠️ Please enter the Product Name (e.g. VIVE Detergent) and Price first.');
+      return;
+    }
 
+    setIsTraining(true);
+    setTrainFeedback('📸 Capturing 3-angle visual burst of product in box...');
+
+    // Capture 2 additional rapid burst frames 120ms apart for rock-solid recognition
+    const extraFrames: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      await new Promise((r) => setTimeout(r, 120));
+      const f = captureCleanFrameBase64();
+      if (f) extraFrames.push(f);
+    }
+
+    let trained: Product | null = null;
     if (trainMode === 'existing') {
       trained = await enrollVisualProduct({
         product_id: selectedProductId,
-        frame_base64: frame,
+        frame_base64: frame1,
+        extra_frames: extraFrames,
       });
     } else {
-      if (!newProdName.trim() || !newProdPrice.trim()) {
-        setTrainFeedback('⚠️ Enter product name and price first.');
-        return;
-      }
       trained = await enrollVisualProduct({
         name: newProdName.trim(),
         price: parseFloat(newProdPrice),
-        image_emoji: newProdEmoji || '📦',
-        category: 'Store Custom',
-        frame_base64: frame,
+        category: newProdCategory.trim() || 'Household & Cleaning',
+        image_emoji: newProdEmoji || '🧴',
+        frame_base64: frame1,
+        extra_frames: extraFrames,
       });
     }
+
+    setIsTraining(false);
 
     if (trained) {
       const updatedList = await fetchProducts();
       setCatalogProducts(updatedList);
-      setTrainFeedback(`✅ Trained "${trained.name}" ($${trained.price.toFixed(2)})! Show it to the camera anytime for instant recognition.`);
+      setTrainFeedback(
+        `✅ Trained & Saved "${trained.name}" ($${trained.price.toFixed(2)}) to backend catalog! Hold it in the camera box anytime to auto-add to cart.`
+      );
       setNewProdName('');
       setNewProdPrice('');
-      triggerProductMatch(trained, 'Visual Fingerprint Enrolled');
+      triggerProductMatch(trained, 'Trained & Added to Backend');
     } else {
-      setTrainFeedback('❌ Could not enroll visual fingerprint. Check backend connection.');
-    }
-  };
-
-  // Tier 3 Deep Cloud AI Scan on demand
-  const handleDeepCloudScan = async () => {
-    const frame = captureCleanFrameBase64();
-    if (!frame) return;
-    const res = await identifyWithCloudAI(frame);
-    if (res?.human_detected) {
-      setHumanWarning(true);
-      return;
-    }
-    if (res?.primary_product) {
-      triggerProductMatch(res.primary_product, res.match_tier || 'Tier 3: Cloud AI Match');
+      setTrainFeedback('❌ Could not capture product features. Hold the product steady inside the center box and try again.');
     }
   };
 
   const simulateBarcodeScan = () => {
-    const pool = catalogProducts.length > 0 ? catalogProducts : [
-      { id: 'prod-001', name: 'Spring Water Bottle', price: 1.50, image: '💧', barcode: '123456789012', category: 'Beverages' },
-      { id: 'prod-002', name: 'Fresh Red Apple', price: 0.85, image: '🍎', barcode: '234567890123', category: 'Produce' },
-      { id: 'prod-003', name: 'Organic Banana', price: 0.65, image: '🍌', barcode: '345678901234', category: 'Produce' },
-      { id: 'prod-004', name: 'Ceramic Coffee Mug', price: 4.99, image: '☕', barcode: '456789012345', category: 'Kitchenware' },
-      { id: 'prod-009', name: 'Hungryman Instant Noodles', price: 1.20, image: '🍜', barcode: '901234567890', category: 'Food & Grocery' },
-    ];
+    const pool =
+      catalogProducts.length > 0
+        ? catalogProducts
+        : [
+            { id: 'prod-001', name: 'Spring Water Bottle', price: 1.5, image: '💧', barcode: '123456789012', category: 'Beverages' },
+            { id: 'prod-009', name: 'Hungryman Instant Noodles', price: 1.2, image: '🍜', barcode: '901234567890', category: 'Food & Grocery' },
+          ];
     const picked = pool[Math.floor(Math.random() * pool.length)];
     triggerProductMatch(picked, 'Tier 1: Simulated Barcode POS');
   };
 
   return (
     <div className="space-y-4">
-      {/* Backend Status Bar */}
+      {/* Status Bar */}
       <div
         className={`px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center justify-between shadow-sm transition-colors ${
           backendStatus === 'connected'
@@ -352,15 +351,15 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           </span>
           <span>
             {backendStatus === 'connected'
-              ? `POS Engine Online • ${activeTier}`
+              ? `POS Scanner Online • ${activeTier}`
               : backendStatus === 'checking'
-              ? 'Connecting to POS Engine...'
-              : 'POS Engine Offline (Port 8000)'}
+              ? 'Starting POS Vision Engine...'
+              : 'POS Engine Offline'}
           </span>
         </div>
         {isDetecting && (
           <span className="text-xs bg-emerald-200 text-emerald-800 px-2.5 py-0.5 rounded-full font-mono animate-pulse">
-            ⚡ Scanning...
+            ⚡ Scanning Product...
           </span>
         )}
       </div>
@@ -384,42 +383,29 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         />
         <canvas ref={canvasRef} className="hidden" />
 
-        {/* Supermarket POS Laser & Reticle */}
+        {/* Product Reticle Box */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div
             className={`w-72 h-52 border-2 rounded-2xl transition-all duration-200 relative flex items-center justify-center ${
-              humanWarning
-                ? 'border-rose-500 bg-rose-500/15 scale-95'
-                : lastScannedName
+              lastScannedName
                 ? 'border-emerald-400 bg-emerald-500/15 scale-105 shadow-[0_0_30px_rgba(16,185,129,0.5)]'
                 : isCapturing
                 ? 'border-indigo-400/90 border-dashed'
                 : 'border-white/30'
             }`}
           >
-            {isCapturing && !lastScannedName && !humanWarning && (
-              <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-red-500 to-transparent opacity-80 animate-pulse" />
+            {isCapturing && !lastScannedName && (
+              <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent opacity-80 animate-pulse" />
             )}
-            <span className="absolute -bottom-6 text-[11px] font-bold uppercase tracking-wider text-white/80 bg-black/60 px-2.5 py-0.5 rounded-full">
-              {humanWarning ? '🚫 Human Not Valid' : 'Hold Product or Barcode Here'}
+            <span className="absolute -bottom-7 text-[11px] font-bold uppercase tracking-wider text-white bg-black/75 px-3 py-1 rounded-full shadow">
+              {lastScannedName
+                ? '✅ Product Matched!'
+                : productNotFound
+                ? '🔍 Product not found — Center item in box or Train below'
+                : 'Place Product Inside Box'}
             </span>
           </div>
         </div>
-
-        {/* Human Face / Person Rejection Alert */}
-        {humanWarning && !lastScannedName && (
-          <div className="absolute top-4 left-4 right-4 bg-rose-600/95 backdrop-blur-md text-white px-4 py-2.5 rounded-lg shadow-xl flex items-center justify-between">
-            <div className="flex items-center space-x-2 font-bold text-sm sm:text-base">
-              <span>🚫 HUMAN NOT VALID</span>
-              <span className="text-xs sm:text-sm font-normal text-rose-100">
-                — Show a store product in front of the scanner
-              </span>
-            </div>
-            <span className="text-xs bg-rose-800 px-2 py-1 rounded font-semibold uppercase">
-              Blocked
-            </span>
-          </div>
-        )}
 
         {/* Instant Detection Flash Banner */}
         {lastScannedName && (
@@ -434,12 +420,19 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           </div>
         )}
 
+        {/* Product Not Found Subtle Indicator (No human distraction) */}
+        {!lastScannedName && productNotFound && isCapturing && (
+          <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-sm text-amber-300 border border-amber-400/30 px-3 py-1 rounded-full text-xs font-semibold">
+            🔍 Product not found
+          </div>
+        )}
+
         {/* Live Scanner Indicator */}
         <div className="absolute bottom-3 left-3">
           {isCapturing ? (
             <div className="flex items-center space-x-2 bg-black/75 backdrop-blur-sm px-3 py-1.5 rounded-full">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
-              <span className="text-white text-xs font-semibold">Hands-Free Auto-Scan ON</span>
+              <span className="text-white text-xs font-semibold">Hands-Free Product Focus ON</span>
             </div>
           ) : (
             <div className="bg-black/60 px-3 py-1.5 rounded-full text-white/70 text-xs">
@@ -449,29 +442,23 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         </div>
       </div>
 
-      {/* Live Frame Telemetry */}
+      {/* Live Frame Telemetry (Humans filtered out) */}
       {lastDetection && lastDetection.detections.length > 0 && (
         <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
           <p className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-            Live Optical Telemetry:
+            Detected Product Candidates:
           </p>
           <div className="flex flex-wrap gap-2">
             {lastDetection.detections.map((det, i) => (
               <span
                 key={i}
                 className={`text-xs px-2.5 py-1 rounded-md font-medium flex items-center space-x-1.5 ${
-                  det.class_name === 'person'
-                    ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                    : det.product_id
+                  det.product_id
                     ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 font-semibold'
                     : 'bg-zinc-100 text-zinc-700'
                 }`}
               >
-                <span>
-                  {det.class_name === 'person'
-                    ? '🚫 Human (Ignored)'
-                    : det.product_name ?? det.class_name}
-                </span>
+                <span>{det.product_name ?? det.class_name}</span>
                 <span className="opacity-60 text-[10px]">
                   ({(det.confidence * 100).toFixed(0)}%)
                 </span>
@@ -504,10 +491,9 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
         <button
           onClick={() => setShowTrainPanel((prev) => !prev)}
-          disabled={backendStatus !== 'connected'}
-          className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-zinc-200 disabled:text-zinc-400 text-white py-3 px-4 rounded-xl font-bold text-sm transition-all shadow-md flex items-center justify-center space-x-2"
+          className="bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-4 rounded-xl font-bold text-sm transition-all shadow-md flex items-center justify-center space-x-2"
         >
-          <span>🎯 Quick-Train Any Product</span>
+          <span>🎯 {showTrainPanel ? 'Hide Product Trainer' : 'Train / Add Product'}</span>
         </button>
 
         <button
@@ -518,53 +504,123 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         </button>
       </div>
 
-      {/* 1-Click Visual Product Trainer Panel */}
+      {/* Live Camera Product Capture, Training & Backend Registration Panel */}
       {showTrainPanel && (
-        <div className="bg-indigo-50/90 border-2 border-indigo-200 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
+        <div className="bg-indigo-50/95 border-2 border-indigo-200 rounded-2xl p-4 space-y-3 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h4 className="font-bold text-indigo-950 text-sm">
-                🎯 1-Click Visual Fingerprint Trainer (99.9% Local Match)
+              <h4 className="font-extrabold text-indigo-950 text-sm sm:text-base flex items-center gap-1.5">
+                <span>📸</span>
+                <span>Train &amp; Add Product from Camera (Saves to Backend Catalog)</span>
               </h4>
-              <p className="text-xs text-indigo-800">
-                Hold ANY physical item from your shop inside the camera box above and click{' '}
-                <strong>Capture &amp; Bind</strong>. The scanner will memorize its exact package colors &amp; shape and recognize it in &lt;50ms!
+              <p className="text-xs text-indigo-800 mt-0.5">
+                Hold your product (e.g. <strong>VIVE Detergent</strong>) inside the center camera box above, enter its details below, and click{' '}
+                <strong>Capture, Train &amp; Save</strong>.
               </p>
             </div>
-            <button
-              onClick={handleDeepCloudScan}
-              className="text-xs bg-white border border-indigo-300 text-indigo-700 px-2.5 py-1.5 rounded-lg font-semibold hover:bg-indigo-100 shrink-0"
-            >
-              ✨ Cloud AI Identify
-            </button>
+
+            <div className="flex space-x-1.5 text-xs font-bold shrink-0">
+              <button
+                type="button"
+                onClick={() => setTrainMode('new')}
+                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                  trainMode === 'new'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-white text-indigo-700 border border-indigo-200'
+                }`}
+              >
+                ➕ Train New Product
+              </button>
+              <button
+                type="button"
+                onClick={() => setTrainMode('existing')}
+                className={`px-3 py-1.5 rounded-lg transition-colors ${
+                  trainMode === 'existing'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'bg-white text-indigo-700 border border-indigo-200'
+                }`}
+              >
+                🔄 Re-Train Existing
+              </button>
+            </div>
           </div>
 
-          <div className="flex space-x-2 text-xs font-bold">
-            <button
-              type="button"
-              onClick={() => setTrainMode('existing')}
-              className={`px-3 py-1.5 rounded-lg ${
-                trainMode === 'existing'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-white text-indigo-700 border border-indigo-200'
-              }`}
-            >
-              Bind to Existing Database Item
-            </button>
-            <button
-              type="button"
-              onClick={() => setTrainMode('new')}
-              className={`px-3 py-1.5 rounded-lg ${
-                trainMode === 'new'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-white text-indigo-700 border border-indigo-200'
-              }`}
-            >
-              ➕ Create &amp; Train New Store Item
-            </button>
-          </div>
+          {trainMode === 'new' ? (
+            <form onSubmit={handleQuickTrain} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                <div className="sm:col-span-5">
+                  <label className="block text-[11px] font-bold text-indigo-900 uppercase mb-1">
+                    Product Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. VIVE Detergent"
+                    value={newProdName}
+                    onChange={(e) => setNewProdName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
 
-          {trainMode === 'existing' ? (
+                <div className="sm:col-span-3">
+                  <label className="block text-[11px] font-bold text-indigo-900 uppercase mb-1">
+                    Price ($) *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    placeholder="e.g. 2.50"
+                    value={newProdPrice}
+                    onChange={(e) => setNewProdPrice(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-bold text-indigo-900 uppercase mb-1">
+                    Category
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Household & Cleaning"
+                    value={newProdCategory}
+                    onChange={(e) => setNewProdCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="text-xs font-bold text-indigo-900 mr-1">Icon:</span>
+                  {EMOJI_CHOICES.map((em) => (
+                    <button
+                      type="button"
+                      key={em}
+                      onClick={() => setNewProdEmoji(em)}
+                      className={`text-base p-1 rounded-lg transition-transform ${
+                        newProdEmoji === em
+                          ? 'bg-indigo-600 scale-110 shadow-sm'
+                          : 'bg-white/70 hover:bg-white'
+                      }`}
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isTraining}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold px-5 py-2.5 rounded-xl text-sm shadow-md transition-all shrink-0"
+                >
+                  {isTraining ? '⏳ Training 3 Angles...' : '📸 Capture, Train & Save to Backend'}
+                </button>
+              </div>
+            </form>
+          ) : (
             <div className="flex flex-col sm:flex-row gap-2">
               <select
                 value={selectedProductId}
@@ -574,49 +630,25 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
                 {catalogProducts.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.image} {p.name} — ${p.price.toFixed(2)}{' '}
-                    {p.has_visual_fingerprint ? ' (✅ Trained)' : ''}
+                    {p.has_visual_fingerprint ? ' (✅ Visually Trained)' : ''}
                   </option>
                 ))}
               </select>
               <button
                 type="button"
-                onClick={handleQuickTrain}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2 rounded-lg text-sm shadow"
+                disabled={isTraining}
+                onClick={() => handleQuickTrain()}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-5 py-2 rounded-xl text-sm shadow"
               >
-                📸 Capture &amp; Bind Item Now
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-              <input
-                type="text"
-                placeholder="Product Name (e.g. Peak Milk)"
-                value={newProdName}
-                onChange={(e) => setNewProdName(e.target.value)}
-                className="sm:col-span-2 px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white text-slate-900"
-              />
-              <input
-                type="number"
-                step="0.01"
-                placeholder="Price ($)"
-                value={newProdPrice}
-                onChange={(e) => setNewProdPrice(e.target.value)}
-                className="px-3 py-2 rounded-lg border border-indigo-300 text-sm bg-white text-slate-900"
-              />
-              <button
-                type="button"
-                onClick={handleQuickTrain}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-lg text-sm shadow"
-              >
-                📸 Save &amp; Train
+                {isTraining ? '⏳ Training...' : '📸 Capture & Update Fingerprint'}
               </button>
             </div>
           )}
 
           {trainFeedback && (
-            <p className="text-xs font-semibold text-indigo-950 bg-white/80 px-3 py-2 rounded-lg border border-indigo-200">
+            <div className="text-xs font-bold text-indigo-950 bg-white px-3.5 py-2.5 rounded-xl border border-indigo-200 shadow-sm">
               {trainFeedback}
-            </p>
+            </div>
           )}
         </div>
       )}

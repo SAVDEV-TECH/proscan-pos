@@ -9,6 +9,7 @@ export interface Product {
   yolo_classes?: string;
   has_visual_fingerprint?: boolean;
   reference_image?: string;
+  visual_embeddings?: number[][];
 }
 
 export const PRODUCTS: Product[] = [

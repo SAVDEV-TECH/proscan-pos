@@ -62,7 +62,9 @@ export default function InventoryDashboard() {
   const stats = useMemo(() => {
     const total = products.length;
     const avgPrice = total > 0 ? (products.reduce((acc, p) => acc + p.price, 0) / total).toFixed(2) : '0.00';
-    const mapped = products.filter((p) => p.yolo_classes && p.yolo_classes.trim() !== '').length;
+    const mapped = products.filter(
+      (p) => (p.yolo_classes && p.yolo_classes.trim() !== '') || p.has_visual_fingerprint
+    ).length;
     return { total, avgPrice, mapped, categoriesCount: categories.length - 1 };
   }, [products, categories]);
 
@@ -292,7 +294,15 @@ export default function InventoryDashboard() {
                   filteredProducts.map((p) => (
                     <tr key={p.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-6 py-4 flex items-center space-x-3">
-                        <span className="text-2xl p-1.5 bg-slate-100 rounded-lg">{p.image}</span>
+                        {p.reference_image ? (
+                          <img
+                            src={p.reference_image}
+                            alt={p.name}
+                            className="w-11 h-11 rounded-lg object-cover border border-indigo-200 shadow-sm shrink-0"
+                          />
+                        ) : (
+                          <span className="text-2xl p-1.5 bg-slate-100 rounded-lg">{p.image}</span>
+                        )}
                         <div>
                           <p className="font-bold text-slate-900">{p.name}</p>
                           <p className="text-xs text-slate-500 line-clamp-1">{p.description || 'No description'}</p>
@@ -310,13 +320,22 @@ export default function InventoryDashboard() {
                         {p.barcode}
                       </td>
                       <td className="px-6 py-4">
-                        {p.yolo_classes ? (
-                          <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                            🤖 {p.yolo_classes}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-slate-400 italic">None</span>
-                        )}
+                        <div className="flex flex-wrap gap-1">
+                          {p.has_visual_fingerprint && (
+                            <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              📸 Camera Trained
+                            </span>
+                          )}
+                          {p.yolo_classes ? (
+                            <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              🤖 {p.yolo_classes}
+                            </span>
+                          ) : (
+                            !p.has_visual_fingerprint && (
+                              <span className="text-xs text-slate-400 italic">None</span>
+                            )
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-right space-x-2">
                         <button
