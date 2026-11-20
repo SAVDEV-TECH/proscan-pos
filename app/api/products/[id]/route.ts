@@ -1,33 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readServerCatalog, writeServerCatalog } from '@/lib/serverCatalog';
+import { updateCatalogProduct, deleteCatalogProduct } from '@/lib/serverCatalog';
+
+export const dynamic = 'force-dynamic';
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const id = params.id;
     const updates = await req.json();
-    const items = readServerCatalog();
-    const idx = items.findIndex((p) => p.id === id);
+    const updatedProduct = await updateCatalogProduct(params.id, updates);
 
-    if (idx === -1) {
+    if (!updatedProduct) {
       return NextResponse.json({ detail: 'Product not found' }, { status: 404 });
     }
-
-    const updatedProduct = {
-      ...items[idx],
-      ...updates,
-      price: updates.price !== undefined ? Number(updates.price) : items[idx].price,
-      has_visual_fingerprint: Boolean(
-        updates.has_visual_fingerprint ??
-          items[idx].has_visual_fingerprint ??
-          updates.visual_embeddings?.length
-      ),
-    };
-
-    items[idx] = updatedProduct;
-    writeServerCatalog(items);
 
     return NextResponse.json(updatedProduct, { status: 200 });
   } catch (err) {
@@ -42,9 +28,6 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const id = params.id;
-  const items = readServerCatalog();
-  const filtered = items.filter((p) => p.id !== id);
-  writeServerCatalog(filtered);
+  await deleteCatalogProduct(params.id);
   return NextResponse.json({ success: true }, { status: 200 });
 }

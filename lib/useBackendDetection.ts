@@ -434,7 +434,27 @@ export function useBackendDetection(backendUrl: string = DEFAULT_BACKEND_URL) {
 
   const identifyWithCloudAI = useCallback(
     async (base64Image: string) => {
-      return detectFromBase64(base64Image, 0.40);
+      setIsLoading(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/identify-ai', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64Image }),
+        });
+        if (res.ok) {
+          const data: DetectionResponse = await res.json();
+          setLastDetection(data);
+          if (data.primary_product) {
+            return data;
+          }
+        }
+        return await detectFromBase64(base64Image, 0.40);
+      } catch {
+        return await detectFromBase64(base64Image, 0.40);
+      } finally {
+        setIsLoading(false);
+      }
     },
     [detectFromBase64]
   );

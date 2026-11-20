@@ -1,0 +1,16 @@
+backend_venv/
+backend_venv_new/
+__pycache__/
+*.pt
+*.db
+dataset/
+runs/
+scratch/
+backend_main.py
+database.py
+backend.env
+requirements_backend.txt
+.env
+.env.local
+node_modules/
+.next/

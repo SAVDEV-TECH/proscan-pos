@@ -100,6 +100,11 @@ export function CartSummary() {
     );
 
     recordSale(receipt);
+    fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(receipt),
+    }).catch(() => {});
     setLastReceipt(receipt);
     setMobileDrawerOpen(false);
     setReceiptOpen(true);
