@@ -52,7 +52,7 @@ function fuzzyMatchCatalog(query: string, items: Product[]): Product | undefined
 export async function POST(req: NextRequest) {
   try {
     const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-    const { image } = await req.json();
+    const { image, catalog: clientCatalog } = await req.json();
 
     if (!image || typeof image !== 'string') {
       return NextResponse.json({ success: false, message: 'No image provided' }, { status: 400 });
@@ -67,7 +67,34 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { items } = await listCatalogProducts();
+    const { items: serverItems } = await listCatalogProducts();
+
+    // Merge client-cached Mogshops catalog with server catalog so ALL 106+ Mogshops products are ALWAYS matched
+    // even if Firestore temporarily hits daily Spark quota!
+    const mergedMap = new Map<string, Product>();
+    if (Array.isArray(clientCatalog)) {
+      for (const c of clientCatalog) {
+        if (c && c.id && c.name) {
+          mergedMap.set(String(c.id), {
+            id: String(c.id),
+            name: String(c.name),
+            price: Number(c.price || 0),
+            image: String(c.image || ''),
+            reference_image: String(c.reference_image || ''),
+            barcode: String(c.barcode || c.id),
+            category: String(c.category || 'General'),
+            description: String(c.description || ''),
+          });
+        }
+      }
+    }
+    for (const s of serverItems) {
+      if (!mergedMap.has(s.id)) {
+        mergedMap.set(s.id, s);
+      }
+    }
+    const items = Array.from(mergedMap.values());
+
     // Compact id:name list so ALL 100+ Mogshops products fit easily in context
     const catalogLines = items
       .slice(0, 400)

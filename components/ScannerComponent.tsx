@@ -110,28 +110,23 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     }
   };
 
-  // Poll health & sync catalog
+  // Load catalog ONCE on mount (prevents Firestore 429 quota exhaustion!)
   useEffect(() => {
     let mounted = true;
-    const checkHealth = async () => {
-      const isHealthy = await checkBackendHealth();
+    const initEngineAndCatalog = async () => {
+      const [isHealthy, items] = await Promise.all([checkBackendHealth(), fetchProducts()]);
       if (!mounted) return;
       setBackendStatus(isHealthy ? 'connected' : 'disconnected');
-      const items = await fetchProducts();
-      if (mounted && items.length > 0) {
+      if (items.length > 0) {
         setCatalogProducts(items);
-        if (!selectedProductId) {
-          setSelectedProductId(items[0].id);
-        }
+        setSelectedProductId((prev) => prev || items[0].id);
       }
     };
-    checkHealth();
-    const healthTimer = setInterval(checkHealth, 5000);
+    initEngineAndCatalog();
     return () => {
       mounted = false;
-      clearInterval(healthTimer);
     };
-  }, [checkBackendHealth, selectedProductId]);
+  }, [checkBackendHealth]);
 
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
   const [cameraRetryKey, setCameraRetryKey] = useState(0);
@@ -482,8 +477,10 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           return;
         }
 
-        // Tier 2: Trained Visual Fingerprint + Neural Object Match (humans ignored)
-        const result = await detectFromBase64(fullFrame, 0.50, detectedBarcode);
+        const productCrop = captureTrackedCropBase64();
+
+        // Tier 2: Trained Visual Fingerprint (checked on BOTH Red-Tracked Crop & Full Frame) + Neural Box Tracker
+        const result = await detectFromBase64(fullFrame, 0.50, detectedBarcode, productCrop);
 
         if (result?.tracked_box) {
           updateTrackedBox(result.tracked_box, true);
@@ -512,14 +509,13 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         }
 
         // Tier 3: Automatic Gemini 2.5 Flash Match across ALL 106+ Mogshops Products!
-        // Runs every ~2.2s on the tightly cropped tracked product (cropping out humans!)
+        // Runs every ~1.8s on the tightly cropped tracked product (cropping out humans!)
         const now = Date.now();
-        if (now - lastCloudAiCallRef.current >= 2200) {
+        if (now - lastCloudAiCallRef.current >= 1800) {
           lastCloudAiCallRef.current = now;
           setAiScanning(true);
           try {
-            const productCrop = captureTrackedCropBase64() || fullFrame;
-            const aiRes = await identifyWithCloudAI(productCrop);
+            const aiRes = await identifyWithCloudAI(productCrop || fullFrame);
             if (aiRes?.tracked_box && !trackedBoxRef.current) {
               updateTrackedBox(aiRes.tracked_box, true);
             }
@@ -599,8 +595,10 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     setIsTraining(true);
     setTrainFeedback('Capturing product...');
 
-    // Capture 2 additional rapid burst frames 120ms apart from the tracked product box
+    // Capture 2 additional rapid burst frames (both tight product crop and full frame for multi-distance matching)
     const extraFrames: string[] = [];
+    const fullSnap = captureCleanFrameBase64();
+    if (fullSnap) extraFrames.push(fullSnap);
     for (let i = 0; i < 2; i++) {
       await new Promise((r) => setTimeout(r, 120));
       const f = captureTrackedCropBase64();

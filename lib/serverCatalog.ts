@@ -6,6 +6,15 @@ import { getAdminDb } from '@/lib/firebaseAdmin';
 const DB_FILE = path.join(process.cwd(), 'catalog_db.json');
 const COLLECTION = 'products';
 
+// Server-side in-memory cache (15-minute TTL) to prevent Firestore 429 Quota Exhaustion!
+const CACHE_TTL_MS = 15 * 60 * 1000;
+let cachedCatalog: { items: Product[]; source: 'firestore' | 'firestore-rest' | 'local'; expiresAt: number } | null = null;
+let lastKnownFirestoreItems: Product[] | null = null;
+
+function invalidateCache() {
+  cachedCatalog = null;
+}
+
 function normalizeDocToProduct(id: string, data: Record<string, any>): Product {
   const firstImg =
     (typeof data.reference_image === 'string' && isRealImage(data.reference_image) && data.reference_image) ||
@@ -61,7 +70,7 @@ async function fetchFirestoreViaPublicRest(): Promise<Product[] | null> {
   if (!projectId) return null;
 
   try {
-    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${COLLECTION}?pageSize=100`;
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${COLLECTION}?pageSize=120`;
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) return null;
     const json = await res.json();
@@ -104,6 +113,11 @@ function writeLocalJsonCatalog(items: Product[]): void {
 }
 
 export async function listCatalogProducts(): Promise<{ items: Product[]; source: 'firestore' | 'firestore-rest' | 'local' }> {
+  // Return cached catalog immediately if fresh (saves 99.9% of Firestore reads!)
+  if (cachedCatalog && Date.now() < cachedCatalog.expiresAt) {
+    return { items: cachedCatalog.items, source: cachedCatalog.source };
+  }
+
   // 1. Try Firebase Admin SDK (full read/write)
   const db = getAdminDb();
   if (db) {
@@ -117,13 +131,15 @@ export async function listCatalogProducts(): Promise<{ items: Product[]; source:
         ...firestoreItems,
         ...PRODUCTS.filter((p) => !existingIds.has(p.id)),
       ];
+      lastKnownFirestoreItems = merged;
+      cachedCatalog = { items: merged, source: 'firestore', expiresAt: Date.now() + CACHE_TTL_MS };
       return { items: merged, source: 'firestore' };
     } catch (err) {
       console.warn('[Firestore Admin] Read error, trying public REST fallback:', err);
     }
   }
 
-  // 2. Try Firestore Public REST Read (works with NEXT_PUBLIC_FIREBASE_PROJECT_ID alone)
+  // 2. Try Firestore Public REST Read
   const restItems = await fetchFirestoreViaPublicRest();
   if (restItems && restItems.length > 0) {
     const existingIds = new Set(restItems.map((p) => p.id));
@@ -132,13 +148,24 @@ export async function listCatalogProducts(): Promise<{ items: Product[]; source:
       ...restItems,
       ...localItems.filter((p) => !existingIds.has(p.id)),
     ];
+    lastKnownFirestoreItems = merged;
+    cachedCatalog = { items: merged, source: 'firestore-rest', expiresAt: Date.now() + CACHE_TTL_MS };
     return { items: merged, source: 'firestore-rest' };
   }
 
-  return { items: readLocalJsonCatalog(), source: 'local' };
+  // 3. If Firestore temporarily hit 429 quota, serve last known Firestore snapshot if available!
+  if (lastKnownFirestoreItems && lastKnownFirestoreItems.length > 0) {
+    cachedCatalog = { items: lastKnownFirestoreItems, source: 'firestore-rest', expiresAt: Date.now() + 60_000 };
+    return { items: lastKnownFirestoreItems, source: 'firestore-rest' };
+  }
+
+  const fallback = readLocalJsonCatalog();
+  cachedCatalog = { items: fallback, source: 'local', expiresAt: Date.now() + 60_000 };
+  return { items: fallback, source: 'local' };
 }
 
 export async function createCatalogProduct(body: Record<string, any>): Promise<{ product: Product; source: 'firestore' | 'local' }> {
+  invalidateCache();
   const id = body.id ? String(body.id) : `prod-${Date.now().toString(36)}`;
   const photo = isRealImage(body.reference_image)
     ? String(body.reference_image)
@@ -197,6 +224,7 @@ export async function createCatalogProduct(body: Record<string, any>): Promise<{
 }
 
 export async function updateCatalogProduct(id: string, updates: Record<string, any>): Promise<Product | null> {
+  invalidateCache();
   const db = getAdminDb();
   if (db) {
     try {
@@ -206,68 +234,90 @@ export async function updateCatalogProduct(id: string, updates: Record<string, a
         ? normalizeDocToProduct(id, snap.data() || {})
         : PRODUCTS.find((p) => p.id === id);
 
-      if (!existingBase) return null;
+      if (existingBase || updates.name) {
+        const photo = isRealImage(updates.reference_image)
+          ? String(updates.reference_image)
+          : isRealImage(updates.image)
+          ? String(updates.image)
+          : existingBase?.reference_image || '';
 
-      const photo = isRealImage(updates.reference_image)
-        ? String(updates.reference_image)
-        : isRealImage(updates.image)
-        ? String(updates.image)
-        : existingBase.reference_image || '';
+        const merged: Product = {
+          id,
+          name: String(updates.name ?? existingBase?.name ?? 'Product'),
+          price: updates.price !== undefined ? Number(updates.price) : (existingBase?.price ?? 0),
+          image: photo || updates.image || existingBase?.image || '',
+          reference_image: photo,
+          barcode: String(updates.barcode ?? existingBase?.barcode ?? id),
+          category: String(updates.category ?? existingBase?.category ?? 'General'),
+          description: String(updates.description ?? existingBase?.description ?? ''),
+          yolo_classes: String(updates.yolo_classes ?? existingBase?.yolo_classes ?? ''),
+          has_visual_fingerprint: Boolean(
+            updates.has_visual_fingerprint ??
+              existingBase?.has_visual_fingerprint ??
+              updates.visual_embeddings?.length
+          ),
+          visual_embeddings: Array.isArray(updates.visual_embeddings)
+            ? updates.visual_embeddings
+            : existingBase?.visual_embeddings,
+        };
 
-      const merged: Product = {
-        ...existingBase,
-        ...updates,
-        id,
-        price: updates.price !== undefined ? Number(updates.price) : existingBase.price,
-        image: photo || updates.image || existingBase.image,
-        reference_image: photo,
-        has_visual_fingerprint: Boolean(
-          updates.has_visual_fingerprint ??
-            existingBase.has_visual_fingerprint ??
-            updates.visual_embeddings?.length
-        ),
-      };
+        const firestoreUpdate: Record<string, any> = {
+          name: merged.name,
+          price: merged.price,
+          image: merged.image,
+          reference_image: merged.reference_image || '',
+          barcode: merged.barcode,
+          category: merged.category,
+          description: merged.description || '',
+          yolo_classes: merged.yolo_classes || '',
+          has_visual_fingerprint: Boolean(merged.has_visual_fingerprint),
+          updatedAt: new Date().toISOString(),
+        };
+        if (merged.reference_image) {
+          firestoreUpdate.images = [merged.reference_image];
+        }
+        if (Array.isArray(updates.visual_embeddings) && updates.visual_embeddings.length > 0) {
+          firestoreUpdate.visual_embeddings_json = JSON.stringify(updates.visual_embeddings);
+        }
 
-      const firestoreUpdate: Record<string, any> = {
-        name: merged.name,
-        price: merged.price,
-        image: merged.image,
-        reference_image: merged.reference_image || '',
-        barcode: merged.barcode,
-        category: merged.category,
-        description: merged.description || '',
-        yolo_classes: merged.yolo_classes || '',
-        has_visual_fingerprint: Boolean(merged.has_visual_fingerprint),
-        updatedAt: new Date().toISOString(),
-      };
-      if (merged.reference_image) {
-        firestoreUpdate.images = [merged.reference_image];
+        await docRef.set(firestoreUpdate, { merge: true });
+        return merged;
       }
-      if (Array.isArray(updates.visual_embeddings) && updates.visual_embeddings.length > 0) {
-        firestoreUpdate.visual_embeddings_json = JSON.stringify(updates.visual_embeddings);
-      }
-
-      await docRef.set(firestoreUpdate, { merge: true });
-      return merged;
     } catch (err) {
       console.error('[Firestore] Update error:', err);
     }
   }
 
+  // Upsert cleanly in local fallback so updating any Firestore product NEVER returns 404
   const items = readLocalJsonCatalog();
   const idx = items.findIndex((p) => p.id === id);
-  if (idx === -1) return null;
+  const base = idx !== -1 ? items[idx] : lastKnownFirestoreItems?.find((p) => p.id === id);
+
   const updatedProduct: Product = {
-    ...items[idx],
-    ...updates,
-    price: updates.price !== undefined ? Number(updates.price) : items[idx].price,
+    id,
+    name: String(updates.name ?? base?.name ?? 'Trained Product'),
+    price: updates.price !== undefined ? Number(updates.price) : (base?.price ?? 0),
+    image: updates.reference_image || updates.image || base?.image || '',
+    reference_image: updates.reference_image || base?.reference_image || '',
+    barcode: String(updates.barcode ?? base?.barcode ?? id),
+    category: String(updates.category ?? base?.category ?? 'General'),
+    description: String(updates.description ?? base?.description ?? ''),
+    yolo_classes: String(updates.yolo_classes ?? base?.yolo_classes ?? ''),
+    has_visual_fingerprint: Boolean(updates.has_visual_fingerprint ?? base?.has_visual_fingerprint ?? true),
+    visual_embeddings: Array.isArray(updates.visual_embeddings) ? updates.visual_embeddings : base?.visual_embeddings,
   };
-  items[idx] = updatedProduct;
+
+  if (idx !== -1) {
+    items[idx] = updatedProduct;
+  } else {
+    items.unshift(updatedProduct);
+  }
   writeLocalJsonCatalog(items);
   return updatedProduct;
 }
 
 export async function deleteCatalogProduct(id: string): Promise<boolean> {
+  invalidateCache();
   const db = getAdminDb();
   if (db) {
     try {

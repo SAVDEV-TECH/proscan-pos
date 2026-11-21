@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { Product } from '@/lib/products';
-import { fetchProducts, createProduct, updateProduct } from '@/lib/api';
+import { getLocalCatalog, saveLocalCatalog, createProduct, updateProduct } from '@/lib/api';
 
 export interface Detection {
   class_name: string;
@@ -258,7 +258,7 @@ function bestEmbeddingMatch(
     }
   }
 
-  if (bestProduct && bestScore >= 0.84) {
+  if (bestProduct && bestScore >= 0.81) {
     return { product: bestProduct, score: bestScore };
   }
   return null;
@@ -267,10 +267,13 @@ function bestEmbeddingMatch(
 async function runHybridDetection(
   base64Image: string,
   confidence: number,
-  barcodeHint?: string
+  barcodeHint?: string,
+  cropBase64?: string | null
 ): Promise<DetectionResponse> {
-  const catalog = await fetchProducts();
+  // Read synchronously from cached local catalog — ZERO Firestore polling spam!
+  const catalog = getLocalCatalog();
   const localMap = getStoredEmbeddings();
+  const hasRealStoreCatalog = catalog.length > 15;
 
   // ---------------- TIER 1: BARCODE MATCH ----------------
   if (barcodeHint) {
@@ -300,8 +303,17 @@ async function runHybridDetection(
   const img = await decodeBase64ToImageElement(base64Image);
   const queryVectors = computeMultiScaleDescriptors(img);
 
+  // Also extract descriptors from the tightly cropped Red-Tracked Product box if provided
+  if (cropBase64 && cropBase64 !== base64Image) {
+    try {
+      const cropImg = await decodeBase64ToImageElement(cropBase64);
+      queryVectors.push(...computeMultiScaleDescriptors(cropImg));
+    } catch {
+      // ignore crop decode error
+    }
+  }
+
   // ---------------- TIER 2A: TRAINED VISUAL FINGERPRINT MATCH (HIGHEST PRIORITY) ----------------
-  // Checks trained items (like VIVE Detergent) FIRST, completely ignoring any human in the background!
   const fpMatch = bestEmbeddingMatch(queryVectors, catalog, localMap);
   if (fpMatch) {
     return {
@@ -324,7 +336,7 @@ async function runHybridDetection(
     };
   }
 
-  // ---------------- TIER 2B: NEURAL OBJECT DETECTION (HUMANS SILENTLY IGNORED) ----------------
+  // ---------------- TIER 2B: NEURAL OBJECT TRACKER (HUMANS SILENTLY IGNORED) ----------------
   let predictions: Array<{ bbox: [number, number, number, number]; class: string; score: number }> = [];
   try {
     const model = await getBrowserCocoModel();
@@ -367,7 +379,7 @@ async function runHybridDetection(
       }
     }
 
-    if (areaRatio < 0.02 || pred.score < Math.min(confidence, 0.48)) {
+    if (areaRatio < 0.02 || pred.score < Math.min(confidence, 0.50)) {
       continue;
     }
 
@@ -379,7 +391,9 @@ async function runHybridDetection(
     let source = boxFp ? 'visual_fingerprint' : 'yolo';
     let score = boxFp ? Math.max(pred.score, boxFp.score) : pred.score;
 
-    if (!matched) {
+    // Only allow generic COCO demo class fallback when no real 100+ Mogshops catalog is loaded
+    // (Prevents Coco Pops / Viva sachets from falsely ringing up as "Hardcover Notebook" or "Hungryman Noodles"!)
+    if (!matched && !hasRealStoreCatalog && pred.score >= 0.68) {
       const targetClass = pred.class.toLowerCase().trim();
       matched = catalog.find((p) => {
         const classes = (p.yolo_classes || '')
@@ -443,11 +457,11 @@ export function useBackendDetection(_backendUrl: string = DEFAULT_BACKEND_URL) {
   const [lastDetection, setLastDetection] = useState<DetectionResponse | null>(null);
 
   const detectFromBase64 = useCallback(
-    async (base64Image: string, confidence: number = 0.52, barcodeHint?: string) => {
+    async (base64Image: string, confidence: number = 0.52, barcodeHint?: string, cropBase64?: string | null) => {
       setIsLoading(true);
       setError(null);
       try {
-        const data = await runHybridDetection(base64Image, confidence, barcodeHint);
+        const data = await runHybridDetection(base64Image, confidence, barcodeHint, cropBase64);
         setLastDetection(data);
         return data;
       } catch (err) {
@@ -466,10 +480,21 @@ export function useBackendDetection(_backendUrl: string = DEFAULT_BACKEND_URL) {
       setIsLoading(true);
       setError(null);
       try {
+        // Send compact catalog from local cache so Gemini ALWAYS sees all 106+ Mogshops products!
+        const localCatalog = getLocalCatalog().map((p) => ({
+          id: p.id,
+          name: p.name,
+          price: p.price,
+          category: p.category,
+          barcode: p.barcode,
+          image: p.image,
+          reference_image: p.reference_image,
+        }));
+
         const res = await fetch('/api/identify-ai', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64Image }),
+          body: JSON.stringify({ image: base64Image, catalog: localCatalog }),
         });
         if (res.ok) {
           const data: DetectionResponse = await res.json();
@@ -556,14 +581,42 @@ export function useBackendDetection(_backendUrl: string = DEFAULT_BACKEND_URL) {
         }
 
         if (payload.product_id) {
-          saveStoredEmbeddings(payload.product_id, allVectors);
-          const updated = await updateProduct(payload.product_id, {
-            image: thumbUrl || undefined,
-            has_visual_fingerprint: true,
-            reference_image: thumbUrl,
-            visual_embeddings: allVectors,
-          });
-          return updated;
+          const existingEmb = getStoredEmbeddings()[payload.product_id] || [];
+          const mergedVectors = [...allVectors, ...existingEmb].slice(0, 12);
+          saveStoredEmbeddings(payload.product_id, mergedVectors);
+
+          // Update browser catalog immediately so it ALWAYS succeeds without 404!
+          const localList = getLocalCatalog();
+          const targetIdx = localList.findIndex((p) => p.id === payload.product_id);
+          let localUpdated: Product | null = null;
+          if (targetIdx !== -1) {
+            localUpdated = {
+              ...localList[targetIdx],
+              image: thumbUrl || localList[targetIdx].image,
+              reference_image: thumbUrl || localList[targetIdx].reference_image,
+              has_visual_fingerprint: true,
+              visual_embeddings: mergedVectors,
+            };
+            localList[targetIdx] = localUpdated;
+            saveLocalCatalog(localList);
+          }
+
+          // Sync update to server in background (sending full metadata for clean upsert)
+          try {
+            const serverUpdated = await updateProduct(payload.product_id, {
+              name: localUpdated?.name,
+              price: localUpdated?.price,
+              category: localUpdated?.category,
+              barcode: localUpdated?.barcode,
+              image: thumbUrl || localUpdated?.image,
+              has_visual_fingerprint: true,
+              reference_image: thumbUrl,
+              visual_embeddings: mergedVectors,
+            });
+            return serverUpdated;
+          } catch {
+            return localUpdated;
+          }
         } else if (payload.name && payload.price !== undefined) {
           const created = await createProduct({
             name: payload.name,

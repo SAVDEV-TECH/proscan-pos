@@ -113,7 +113,7 @@ export const PRODUCTS: Product[] = [
     barcode: "901234567890",
     category: "Food & Grocery",
     description: "Delicious quick-cooking seasoned ramen noodles",
-    yolo_classes: "hungryman_noodles,bowl",
+    yolo_classes: "hungryman_noodles",
   },
   {
     id: "prod-010",
