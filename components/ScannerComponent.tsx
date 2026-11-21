@@ -73,10 +73,13 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const {
     detectFromBase64,
     identifyWithCloudAI,
+    calibrateBackground,
     enrollVisualProduct,
     checkBackendHealth,
     isLoading: isDetecting,
   } = useBackendDetection();
+  const bgCalibratedRef = useRef(false);
+  const [bgCalibrated, setBgCalibrated] = useState(false);
 
   // Initialize native browser BarcodeDetector and Voice POS setting
   useEffect(() => {
@@ -565,8 +568,20 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     cooldownRef.current = false;
   }, []);
 
-  // Automatically start continuous scanning as soon as camera + engine are ready
+  // Automatically calibrate negative Background/Face class on startup + start continuous scanning
   useEffect(() => {
+    if (cameraReady && backendStatus === 'connected' && !bgCalibratedRef.current) {
+      bgCalibratedRef.current = true;
+      (async () => {
+        await new Promise((r) => setTimeout(r, 400));
+        const f1 = captureCleanFrameBase64();
+        if (f1) await calibrateBackground(f1);
+        await new Promise((r) => setTimeout(r, 300));
+        const f2 = captureCleanFrameBase64();
+        if (f2) await calibrateBackground(f2);
+        setBgCalibrated(true);
+      })();
+    }
     if (cameraReady && backendStatus === 'connected' && !isCapturing) {
       startCapturing();
     }
@@ -576,6 +591,14 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
       }
     };
   }, [cameraReady, backendStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRecalibrateBg = async () => {
+    const f = captureCleanFrameBase64();
+    if (f) {
+      await calibrateBackground(f);
+      setBgCalibrated(true);
+    }
+  };
 
   // 3-Frame Burst Capture & Visual Training -> Captures ONLY the Red-Tracked Product (excluding humans)
   const handleQuickTrain = async (e?: React.FormEvent) => {
@@ -705,6 +728,14 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           )}
           <button
             type="button"
+            onClick={handleRecalibrateBg}
+            title="Teach camera what empty counter / your face looks like so it never false-triggers"
+            className="px-2 py-1 rounded-full text-[11px] font-bold border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-all"
+          >
+            {bgCalibrated ? 'BG Locked' : 'Set BG'}
+          </button>
+          <button
+            type="button"
             onClick={toggleVoicePos}
             className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-all flex items-center space-x-1 ${
               voiceEnabled
@@ -741,8 +772,8 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
         </div>
       )}
 
-      {/* Video Viewport */}
-      <div className="relative bg-zinc-950 rounded-xl overflow-hidden aspect-[4/3] sm:aspect-video min-h-[220px] border-2 border-zinc-800 shadow-inner">
+      {/* Compact Downsized POS Camera Viewport */}
+      <div className="relative mx-auto w-full max-w-[360px] h-[215px] sm:h-[235px] bg-zinc-950 rounded-2xl overflow-hidden border-2 border-zinc-800 shadow-inner">
         <video
           ref={videoRef}
           autoPlay
