@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { useBackendDetection } from '@/lib/useBackendDetection';
+import { useBackendDetection, TrackedBox } from '@/lib/useBackendDetection';
 import { Product, PRODUCTS, getProductPhoto } from '@/lib/products';
 import { fetchProducts } from '@/lib/api';
 import { playErrorBuzz } from '@/lib/audio';
@@ -35,6 +35,8 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const [cameraReady, setCameraReady] = useState(false);
   const [lastScannedProduct, setLastScannedProduct] = useState<Product | null>(null);
   const [productNotFound, setProductNotFound] = useState(false);
+  const [trackedBox, setTrackedBox] = useState<TrackedBox | null>(null);
+  const [aiScanning, setAiScanning] = useState(false);
 
   // Realistic POS Hardware & Cashier Controls
   const [torchSupported, setTorchSupported] = useState(false);
@@ -55,6 +57,12 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   const [trainFeedback, setTrainFeedback] = useState<string | null>(null);
 
   const captureIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const trackIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const trackCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const prevFrameGrayRef = useRef<Uint8Array | null>(null);
+  const trackedBoxRef = useRef<TrackedBox | null>(null);
+  const neuralBoxTimestampRef = useRef<number>(0);
+  const lastCloudAiCallRef = useRef<number>(0);
   const cooldownRef = useRef(false);
   const lastDetectedIdRef = useRef<string | null>(null);
   const candidateIdRef = useRef<string | null>(null);
@@ -64,6 +72,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
 
   const {
     detectFromBase64,
+    identifyWithCloudAI,
     enrollVisualProduct,
     checkBackendHealth,
     isLoading: isDetecting,
@@ -211,6 +220,182 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     return dataUrl.length > 500 ? dataUrl : null;
   }, []);
 
+  // Capture ONLY the region inside the live Red Tracked Product Box (cropping out the human!)
+  const captureTrackedCropBase64 = useCallback((): string | null => {
+    const vid = videoRef.current;
+    const can = canvasRef.current;
+    if (!vid || !can || vid.videoWidth === 0 || vid.videoHeight === 0) return null;
+
+    const box = trackedBoxRef.current;
+    if (!box) return captureCleanFrameBase64();
+
+    // Add generous 22% padding around the tracked product box so brand text is never clipped
+    const padX = Math.max(8, box.w * 0.22);
+    const padY = Math.max(8, box.h * 0.22);
+    const xPct = Math.max(0, box.x - padX);
+    const yPct = Math.max(0, box.y - padY);
+    const wPct = Math.min(100 - xPct, Math.max(38, box.w + padX * 2));
+    const hPct = Math.min(100 - yPct, Math.max(38, box.h + padY * 2));
+
+    const sx = Math.round((xPct / 100) * vid.videoWidth);
+    const sy = Math.round((yPct / 100) * vid.videoHeight);
+    const sw = Math.max(80, Math.round((wPct / 100) * vid.videoWidth));
+    const sh = Math.max(80, Math.round((hPct / 100) * vid.videoHeight));
+
+    const OUT_W = 420;
+    const OUT_H = Math.max(240, Math.min(420, Math.round((sh / sw) * OUT_W)));
+    if (can.width !== OUT_W) can.width = OUT_W;
+    if (can.height !== OUT_H) can.height = OUT_H;
+
+    const ctx = can.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, OUT_W, OUT_H);
+    const dataUrl = can.toDataURL('image/jpeg', 0.88);
+    return dataUrl.length > 500 ? dataUrl : null;
+  }, [captureCleanFrameBase64]);
+
+  // Smoothly update the live Red Tracking Pointer position
+  const updateTrackedBox = useCallback((nextBox: TrackedBox | null, isNeuralPriority = false) => {
+    if (!nextBox) {
+      trackedBoxRef.current = null;
+      setTrackedBox(null);
+      return;
+    }
+    if (isNeuralPriority) {
+      neuralBoxTimestampRef.current = Date.now();
+    }
+    const prev = trackedBoxRef.current;
+    const alpha = isNeuralPriority ? 0.55 : 0.35;
+    const smoothed: TrackedBox = prev
+      ? {
+          x: prev.x + (nextBox.x - prev.x) * alpha,
+          y: prev.y + (nextBox.y - prev.y) * alpha,
+          w: prev.w + (nextBox.w - prev.w) * alpha,
+          h: prev.h + (nextBox.h - prev.h) * alpha,
+          label: nextBox.label || prev.label,
+        }
+      : nextBox;
+
+    trackedBoxRef.current = smoothed;
+    setTrackedBox(smoothed);
+  }, []);
+
+  // Fast 12-FPS Non-Skin Foreground Product Tracker: follows any moving colorful packaging across the screen!
+  useEffect(() => {
+    if (!cameraReady || !isCapturing) {
+      if (trackIntervalRef.current) {
+        clearInterval(trackIntervalRef.current);
+        trackIntervalRef.current = null;
+      }
+      return;
+    }
+
+    if (!trackCanvasRef.current && typeof document !== 'undefined') {
+      const c = document.createElement('canvas');
+      c.width = 64;
+      c.height = 48;
+      trackCanvasRef.current = c;
+    }
+
+    trackIntervalRef.current = setInterval(() => {
+      const vid = videoRef.current;
+      const tCan = trackCanvasRef.current;
+      if (!vid || !tCan || vid.videoWidth === 0 || vid.videoHeight === 0) return;
+
+      // Let fresh neural/Gemini boxes take priority for 700ms
+      if (Date.now() - neuralBoxTimestampRef.current < 700) return;
+
+      const ctx = tCan.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+
+      const W = 64;
+      const H = 48;
+      ctx.drawImage(vid, 0, 0, W, H);
+      const data = ctx.getImageData(0, 0, W, H).data;
+      const currGray = new Uint8Array(W * H);
+      const prevGray = prevFrameGrayRef.current;
+
+      let sumX = 0;
+      let sumY = 0;
+      let totalWeight = 0;
+      let minX = W;
+      let maxX = 0;
+      let minY = H;
+      let maxY = 0;
+      let vividPixels = 0;
+
+      for (let y = 2; y < H - 2; y++) {
+        for (let x = 2; x < W - 2; x++) {
+          const i = y * W + x;
+          const idx = i * 4;
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          const gray = (r * 77 + g * 150 + b * 29) >> 8;
+          currGray[i] = gray;
+
+          // YCbCr Human Skin-Tone Exclusion so the Red Pointer NEVER tracks faces/hands!
+          const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+          const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+          const isSkinTone = cb >= 77 && cb <= 127 && cr >= 133 && cr <= 173 && r > 60 && r > b;
+          if (isSkinTone) continue;
+
+          // Color saturation / vividness of retail packaging (sachets, labels, bottles, logos)
+          const maxC = Math.max(r, g, b);
+          const minC = Math.min(r, g, b);
+          const sat = maxC > 25 ? (maxC - minC) / maxC : 0;
+          const motion = prevGray ? Math.abs(gray - prevGray[i]) : 0;
+
+          // Score pixels that are vivid packaged colors OR actively moving non-skin objects
+          let weight = 0;
+          if (sat > 0.36 && maxC > 55) weight += sat * 2.4;
+          if (motion > 20) weight += Math.min(3.0, motion / 24);
+
+          if (weight >= 1.15) {
+            vividPixels++;
+            sumX += x * weight;
+            sumY += y * weight;
+            totalWeight += weight;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      prevFrameGrayRef.current = currGray;
+
+      if (vividPixels >= 28 && totalWeight > 0) {
+        const cx = sumX / totalWeight;
+        const cy = sumY / totalWeight;
+        const spanW = Math.max(18, Math.min(44, (maxX - minX) * 0.85));
+        const spanH = Math.max(16, Math.min(36, (maxY - minY) * 0.85));
+
+        const xPct = Math.max(3, Math.min(97 - (spanW / W) * 100, ((cx - spanW / 2) / W) * 100));
+        const yPct = Math.max(4, Math.min(96 - (spanH / H) * 100, ((cy - spanH / 2) / H) * 100));
+        const wPct = Math.max(24, Math.min(68, (spanW / W) * 100));
+        const hPct = Math.max(24, Math.min(72, (spanH / H) * 100));
+
+        updateTrackedBox({
+          x: xPct,
+          y: yPct,
+          w: wPct,
+          h: hPct,
+          label: 'Product Target',
+        });
+      }
+    }, 85);
+
+    return () => {
+      if (trackIntervalRef.current) {
+        clearInterval(trackIntervalRef.current);
+        trackIntervalRef.current = null;
+      }
+    };
+  }, [cameraReady, isCapturing, updateTrackedBox]);
+
   // Process a matched product -> add to cart with Supermarket Beep & 2.2s cooldown
   const triggerProductMatch = useCallback(
     (product: Product, _tierLabel?: string) => {
@@ -231,7 +416,7 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     [onScan]
   );
 
-  // Core Continuous POS Scan Loop (ignores humans completely, focuses only on products)
+  // Core Continuous POS Scan Loop (Tier 1 Barcode -> Tier 2 Local Visual/Neural -> Tier 3 Auto Gemini Catalog Match)
   const startCapturing = useCallback(() => {
     if (captureIntervalRef.current) {
       clearInterval(captureIntervalRef.current);
@@ -267,14 +452,18 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           }
         }
 
-        const base64Image = captureCleanFrameBase64();
-        if (!base64Image) {
+        const fullFrame = captureCleanFrameBase64();
+        if (!fullFrame) {
           inFlightRef.current = false;
           return;
         }
 
         // Tier 2: Trained Visual Fingerprint + Neural Object Match (humans ignored)
-        const result = await detectFromBase64(base64Image, 0.50, detectedBarcode);
+        const result = await detectFromBase64(fullFrame, 0.50, detectedBarcode);
+
+        if (result?.tracked_box) {
+          updateTrackedBox(result.tracked_box, true);
+        }
 
         if (result?.primary_product) {
           const prod = result.primary_product;
@@ -294,18 +483,58 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
             candidateHitsRef.current = 0;
             triggerProductMatch(prod);
           }
-        } else {
-          candidateIdRef.current = null;
-          candidateHitsRef.current = 0;
-          setProductNotFound(true);
+          inFlightRef.current = false;
+          return;
         }
+
+        // Tier 3: Automatic Gemini 2.5 Flash Match across ALL 106+ Mogshops Products!
+        // Runs every ~2.2s on the tightly cropped tracked product (cropping out humans!)
+        const now = Date.now();
+        if (now - lastCloudAiCallRef.current >= 2200) {
+          lastCloudAiCallRef.current = now;
+          setAiScanning(true);
+          try {
+            const productCrop = captureTrackedCropBase64() || fullFrame;
+            const aiRes = await identifyWithCloudAI(productCrop);
+            if (aiRes?.tracked_box && !trackedBoxRef.current) {
+              updateTrackedBox(aiRes.tracked_box, true);
+            }
+            if (aiRes?.primary_product) {
+              setProductNotFound(false);
+              if (trackedBoxRef.current) {
+                updateTrackedBox(
+                  { ...trackedBoxRef.current, label: aiRes.primary_product.name },
+                  true
+                );
+              }
+              triggerProductMatch(aiRes.primary_product, 'Tier 3: AI Catalog Match');
+              setAiScanning(false);
+              inFlightRef.current = false;
+              return;
+            }
+          } finally {
+            setAiScanning(false);
+          }
+        }
+
+        candidateIdRef.current = null;
+        candidateHitsRef.current = 0;
+        setProductNotFound(true);
       } catch (err) {
         console.error('Frame scan error:', err);
       } finally {
         inFlightRef.current = false;
       }
-    }, 420);
-  }, [catalogProducts, captureCleanFrameBase64, detectFromBase64, triggerProductMatch]);
+    }, 450);
+  }, [
+    catalogProducts,
+    captureCleanFrameBase64,
+    captureTrackedCropBase64,
+    detectFromBase64,
+    identifyWithCloudAI,
+    triggerProductMatch,
+    updateTrackedBox,
+  ]);
 
   const stopCapturing = useCallback(() => {
     if (captureIntervalRef.current) {
@@ -328,11 +557,11 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     };
   }, [cameraReady, backendStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 3-Frame Burst Capture & Visual Training -> Saves to Backend Catalog
+  // 3-Frame Burst Capture & Visual Training -> Captures ONLY the Red-Tracked Product (excluding humans)
   const handleQuickTrain = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
-    const frame1 = captureCleanFrameBase64();
+    const frame1 = captureTrackedCropBase64();
     if (!frame1) {
       setTrainFeedback('Camera feed not ready yet.');
       return;
@@ -346,11 +575,11 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
     setIsTraining(true);
     setTrainFeedback('Capturing product...');
 
-    // Capture 2 additional rapid burst frames 120ms apart for rock-solid recognition
+    // Capture 2 additional rapid burst frames 120ms apart from the tracked product box
     const extraFrames: string[] = [];
     for (let i = 0; i < 2; i++) {
       await new Promise((r) => setTimeout(r, 120));
-      const f = captureCleanFrameBase64();
+      const f = captureTrackedCropBase64();
       if (f) extraFrames.push(f);
     }
 
@@ -495,34 +724,98 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           <div className="absolute inset-0 bg-emerald-400/20 pointer-events-none transition-opacity duration-200" />
         )}
 
-        {/* Product Reticle Box with Corner L-Brackets */}
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6 sm:p-8">
-          <div
-            className={`w-full max-w-[16rem] sm:max-w-[18rem] h-full max-h-[9.5rem] sm:max-h-[13rem] border rounded-2xl transition-all duration-200 relative flex items-center justify-center ${
-              lastScannedProduct
-                ? 'border-emerald-400 bg-emerald-500/15 scale-105 shadow-[0_0_35px_rgba(16,185,129,0.6)]'
-                : isCapturing
-                ? 'border-indigo-400/50 border-dashed'
-                : 'border-white/25'
-            }`}
-          >
-            <span className="absolute -top-0.5 -left-0.5 w-5 h-5 border-t-4 border-l-4 border-emerald-400 rounded-tl-lg" />
-            <span className="absolute -top-0.5 -right-0.5 w-5 h-5 border-t-4 border-r-4 border-emerald-400 rounded-tr-lg" />
-            <span className="absolute -bottom-0.5 -left-0.5 w-5 h-5 border-b-4 border-l-4 border-emerald-400 rounded-bl-lg" />
-            <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 border-b-4 border-r-4 border-emerald-400 rounded-br-lg" />
+        {/* Dynamic Moving Red Product Pointer & Tracking Box (Follows Product, Ignores Humans) */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          {trackedBox ? (
+            <div
+              style={{
+                left: `${trackedBox.x}%`,
+                top: `${trackedBox.y}%`,
+                width: `${trackedBox.w}%`,
+                height: `${trackedBox.h}%`,
+              }}
+              className={`absolute rounded-xl border-2 transition-all duration-150 ease-out flex items-center justify-center ${
+                lastScannedProduct
+                  ? 'border-emerald-400 bg-emerald-500/15 shadow-[0_0_28px_rgba(16,185,129,0.75)]'
+                  : 'border-red-500/90 bg-red-500/5 shadow-[0_0_22px_rgba(239,68,68,0.55)]'
+              }`}
+            >
+              {/* Pointed Red Arrow Pointer hovering over the moving product */}
+              <div className="absolute -top-9 left-1/2 -translate-x-1/2 flex flex-col items-center">
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider text-white whitespace-nowrap shadow-lg ${
+                    lastScannedProduct
+                      ? 'bg-emerald-600'
+                      : aiScanning
+                      ? 'bg-red-600 animate-pulse'
+                      : 'bg-red-600/95'
+                  }`}
+                >
+                  {lastScannedProduct
+                    ? lastScannedProduct.name
+                    : aiScanning
+                    ? 'Matching...'
+                    : 'Product Locked'}
+                </span>
+                <svg
+                  viewBox="0 0 20 12"
+                  className={`w-4 h-3 -mt-0.5 drop-shadow-[0_2px_4px_rgba(239,68,68,0.85)] ${
+                    lastScannedProduct ? 'text-emerald-400' : 'text-red-500'
+                  }`}
+                  fill="currentColor"
+                >
+                  <polygon points="10,12 0,0 20,0" />
+                </svg>
+              </div>
 
-            {isCapturing && !lastScannedProduct && (
-              <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-rose-500 to-transparent shadow-[0_0_12px_#f43f5e] opacity-90 animate-pulse" />
-            )}
+              {/* Crisp Red Corner L-Brackets */}
+              <span
+                className={`absolute -top-0.5 -left-0.5 w-4 h-4 border-t-[3px] border-l-[3px] rounded-tl-md ${
+                  lastScannedProduct ? 'border-emerald-400' : 'border-red-500'
+                }`}
+              />
+              <span
+                className={`absolute -top-0.5 -right-0.5 w-4 h-4 border-t-[3px] border-r-[3px] rounded-tr-md ${
+                  lastScannedProduct ? 'border-emerald-400' : 'border-red-500'
+                }`}
+              />
+              <span
+                className={`absolute -bottom-0.5 -left-0.5 w-4 h-4 border-b-[3px] border-l-[3px] rounded-bl-md ${
+                  lastScannedProduct ? 'border-emerald-400' : 'border-red-500'
+                }`}
+              />
+              <span
+                className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 border-b-[3px] border-r-[3px] rounded-br-md ${
+                  lastScannedProduct ? 'border-emerald-400' : 'border-red-500'
+                }`}
+              />
 
-            <span className="absolute bottom-2 max-w-[92%] truncate text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-white bg-black/75 px-2.5 py-0.5 rounded-full">
-              {lastScannedProduct
-                ? 'Matched'
-                : productNotFound
-                ? 'Not Found'
-                : 'Scan Item'}
-            </span>
-          </div>
+              {/* Red Laser Crosshair Dot right on the Product */}
+              <div className="relative flex items-center justify-center">
+                <span
+                  className={`w-3.5 h-3.5 rounded-full border-2 ${
+                    lastScannedProduct
+                      ? 'border-emerald-400 bg-emerald-400/30'
+                      : 'border-red-500 bg-red-500/30 animate-ping'
+                  }`}
+                />
+                <span
+                  className={`absolute w-1.5 h-1.5 rounded-full ${
+                    lastScannedProduct ? 'bg-emerald-300' : 'bg-red-500 shadow-[0_0_10px_#ef4444]'
+                  }`}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center p-8">
+              <div className="w-48 h-36 border border-dashed border-red-400/50 rounded-2xl flex items-center justify-center relative">
+                <span className="w-2 h-2 rounded-full bg-red-500/80 animate-pulse" />
+                <span className="absolute bottom-2 text-[10px] font-bold uppercase tracking-wider text-white bg-black/70 px-2.5 py-0.5 rounded-full">
+                  {productNotFound ? 'Product Not Found' : 'Show Product'}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Instant Detection Flash Banner */}

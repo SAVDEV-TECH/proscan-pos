@@ -14,6 +14,14 @@ export interface Detection {
   bbox?: number[];
 }
 
+export interface TrackedBox {
+  x: number; // 0..100 (% from left)
+  y: number; // 0..100 (% from top)
+  w: number; // 0..100 (% width)
+  h: number; // 0..100 (% height)
+  label?: string;
+}
+
 export interface DetectionResponse {
   success: boolean;
   detections: Detection[];
@@ -22,6 +30,8 @@ export interface DetectionResponse {
   match_tier?: string;
   primary_product_id?: string;
   primary_product?: Product;
+  tracked_box?: TrackedBox;
+  box_2d?: number[];
 }
 
 const DEFAULT_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:8000';
@@ -330,28 +340,38 @@ async function runHybridDetection(
   let primaryProduct: Product | undefined;
   let bestConf = 0;
   let matchTier: string | undefined;
+  let bestTrackedBox: TrackedBox | undefined;
+  let bestTrackedScore = 0;
 
   for (const pred of predictions) {
-    // Silently ignore humans — never distract user with "human not valid"
+    // Silently ignore humans — focus ONLY on products held in view
     if (pred.class === 'person') {
       continue;
     }
 
     const [x, y, w, h] = pred.bbox;
     const areaRatio = (w * h) / frameArea;
-    const cx = x + w / 2;
-    const cy = y + h / 2;
-    const inReticle =
-      cx >= 0.12 * img.width &&
-      cx <= 0.88 * img.width &&
-      cy >= 0.12 * img.height &&
-      cy <= 0.88 * img.height;
 
-    if (!inReticle || areaRatio < 0.03 || pred.score < Math.min(confidence, 0.50)) {
+    // Track ANY non-person object anywhere on screen (>= 1.5% area) so the red pointer follows it freely!
+    if (areaRatio >= 0.015 && pred.score >= 0.32) {
+      const pctBox: TrackedBox = {
+        x: Math.max(0, Math.min(95, (x / img.width) * 100)),
+        y: Math.max(0, Math.min(95, (y / img.height) * 100)),
+        w: Math.max(8, Math.min(100, (w / img.width) * 100)),
+        h: Math.max(8, Math.min(100, (h / img.height) * 100)),
+        label: pred.class,
+      };
+      if (pred.score > bestTrackedScore) {
+        bestTrackedScore = pred.score;
+        bestTrackedBox = pctBox;
+      }
+    }
+
+    if (areaRatio < 0.02 || pred.score < Math.min(confidence, 0.48)) {
       continue;
     }
 
-    // Also check if this specific object bounding box matches a trained visual fingerprint
+    // Check if this tracked product box matches any trained visual fingerprint
     const boxVec = computeRegionDescriptor(img, Math.max(0, x), Math.max(0, y), w, h);
     const boxFp = boxVec.length ? bestEmbeddingMatch([boxVec], catalog, localMap) : null;
 
@@ -384,6 +404,13 @@ async function runHybridDetection(
       bestConf = score;
       primaryProduct = matched;
       matchTier = source === 'visual_fingerprint' ? 'Tier 2: Trained Visual Match' : 'Tier 2: Neural Match';
+      bestTrackedBox = {
+        x: Math.max(0, Math.min(95, (x / img.width) * 100)),
+        y: Math.max(0, Math.min(95, (y / img.height) * 100)),
+        w: Math.max(8, Math.min(100, (w / img.width) * 100)),
+        h: Math.max(8, Math.min(100, (h / img.height) * 100)),
+        label: matched.name,
+      };
     }
   }
 
@@ -394,6 +421,7 @@ async function runHybridDetection(
       message: 'Product not found',
       product_not_found: true,
       match_tier: 'Scanning — Product Not Found',
+      tracked_box: bestTrackedBox,
     };
   }
 
@@ -405,10 +433,11 @@ async function runHybridDetection(
     match_tier: matchTier,
     primary_product_id: primaryProduct.id,
     primary_product: primaryProduct,
+    tracked_box: bestTrackedBox,
   };
 }
 
-export function useBackendDetection(backendUrl: string = DEFAULT_BACKEND_URL) {
+export function useBackendDetection(_backendUrl: string = DEFAULT_BACKEND_URL) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastDetection, setLastDetection] = useState<DetectionResponse | null>(null);
@@ -433,7 +462,7 @@ export function useBackendDetection(backendUrl: string = DEFAULT_BACKEND_URL) {
   );
 
   const identifyWithCloudAI = useCallback(
-    async (base64Image: string) => {
+    async (base64Image: string): Promise<DetectionResponse | null> => {
       setIsLoading(true);
       setError(null);
       try {
@@ -444,19 +473,57 @@ export function useBackendDetection(backendUrl: string = DEFAULT_BACKEND_URL) {
         });
         if (res.ok) {
           const data: DetectionResponse = await res.json();
-          setLastDetection(data);
-          if (data.primary_product) {
-            return data;
+
+          // Convert Gemini normalized [ymin, xmin, ymax, xmax] (0..1000) into percentage tracked_box
+          if (Array.isArray(data.box_2d) && data.box_2d.length === 4) {
+            const [ymin, xmin, ymax, xmax] = data.box_2d;
+            if (ymax > ymin && xmax > xmin) {
+              data.tracked_box = {
+                x: Math.max(0, Math.min(95, xmin / 10)),
+                y: Math.max(0, Math.min(95, ymin / 10)),
+                w: Math.max(10, Math.min(100, (xmax - xmin) / 10)),
+                h: Math.max(10, Math.min(100, (ymax - ymin) / 10)),
+                label: data.primary_product?.name,
+              };
+            }
           }
+
+          // Auto-Learn visual fingerprint from the live camera frame when Gemini matches a Mogshops product!
+          if (data.primary_product) {
+            try {
+              const img = await decodeBase64ToImageElement(base64Image);
+              let vecs: number[][];
+              if (data.tracked_box) {
+                const bx = (data.tracked_box.x / 100) * img.width;
+                const by = (data.tracked_box.y / 100) * img.height;
+                const bw = (data.tracked_box.w / 100) * img.width;
+                const bh = (data.tracked_box.h / 100) * img.height;
+                const tightVec = computeRegionDescriptor(img, bx, by, bw, bh);
+                vecs = tightVec.length ? [tightVec, ...computeMultiScaleDescriptors(img)] : computeMultiScaleDescriptors(img);
+              } else {
+                vecs = computeMultiScaleDescriptors(img);
+              }
+              if (vecs.length > 0) {
+                const existing = getStoredEmbeddings()[data.primary_product.id] || [];
+                // Keep up to 9 angles per product so subsequent scans match in <50ms locally!
+                saveStoredEmbeddings(data.primary_product.id, [...vecs, ...existing].slice(0, 9));
+              }
+            } catch {
+              // non-fatal auto-learn error
+            }
+          }
+
+          setLastDetection(data);
+          return data;
         }
-        return await detectFromBase64(base64Image, 0.40);
+        return null;
       } catch {
-        return await detectFromBase64(base64Image, 0.40);
+        return null;
       } finally {
         setIsLoading(false);
       }
     },
-    [detectFromBase64]
+    []
   );
 
   const enrollVisualProduct = useCallback(
@@ -550,7 +617,7 @@ export function useBackendDetection(backendUrl: string = DEFAULT_BACKEND_URL) {
     } catch {
       return true;
     }
-  }, [backendUrl]);
+  }, []);
 
   return {
     detectFromBase64,
