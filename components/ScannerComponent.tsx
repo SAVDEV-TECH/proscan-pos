@@ -134,18 +134,29 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
   }, [checkBackendHealth, selectedProductId]);
 
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
+  const [cameraRetryKey, setCameraRetryKey] = useState(0);
 
-  // Initialize camera stream & detect hardware torch support
+  // Initialize camera stream & detect hardware torch support (with safe async cleanup)
   useEffect(() => {
     if (!isScanning) return;
+    let cancelled = false;
+    let activeStream: MediaStream | null = null;
     const videoEl = videoRef.current;
+
+    const releaseStream = () => {
+      if (activeStream) {
+        activeStream.getTracks().forEach((track) => track.stop());
+        activeStream = null;
+      }
+      if (videoEl?.srcObject) {
+        (videoEl.srcObject as MediaStream).getTracks().forEach((track) => track.stop());
+        videoEl.srcObject = null;
+      }
+    };
 
     const startCamera = async () => {
       try {
-        if (videoEl?.srcObject) {
-          const oldTracks = (videoEl.srcObject as MediaStream).getTracks();
-          oldTracks.forEach((track) => track.stop());
-        }
+        releaseStream();
         setTorchOn(false);
         setTorchSupported(false);
 
@@ -157,6 +168,12 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           },
         });
 
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        activeStream = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           setError(null);
@@ -170,20 +187,27 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unable to access camera';
-        setError(message);
+        if (cancelled) return;
+        const rawMsg = err instanceof Error ? err.message : 'Unable to access camera';
+        if (rawMsg.toLowerCase().includes('in use') || rawMsg.toLowerCase().includes('notreadable')) {
+          setError('Camera is busy in another tab or app (e.g. your other Render/localhost tab). Close that tab and click Retry Camera.');
+        } else {
+          setError(rawMsg);
+        }
       }
     };
 
     startCamera();
+    window.addEventListener('pagehide', releaseStream);
+    window.addEventListener('beforeunload', releaseStream);
 
     return () => {
-      if (videoEl?.srcObject) {
-        const tracks = (videoEl.srcObject as MediaStream).getTracks();
-        tracks.forEach((track) => track.stop());
-      }
+      cancelled = true;
+      window.removeEventListener('pagehide', releaseStream);
+      window.removeEventListener('beforeunload', releaseStream);
+      releaseStream();
     };
-  }, [isScanning, cameraFacing]);
+  }, [isScanning, cameraFacing, cameraRetryKey]);
 
   const toggleTorch = async () => {
     try {
@@ -701,9 +725,21 @@ export function CameraScanner({ onScan, isScanning }: CameraScannerProps) {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-800 px-3 py-2 rounded-xl text-xs flex items-center space-x-2">
-          <AlertIcon className="w-4 h-4 shrink-0 text-red-600" />
-          <span className="break-words">{error}</span>
+        <div className="bg-red-50 border border-red-200 text-red-800 px-3 py-2.5 rounded-xl text-xs flex items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 min-w-0">
+            <AlertIcon className="w-4 h-4 shrink-0 text-red-600" />
+            <span className="break-words font-medium">{error}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setCameraRetryKey((k) => k + 1);
+            }}
+            className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg shrink-0"
+          >
+            Retry Camera
+          </button>
         </div>
       )}
 
